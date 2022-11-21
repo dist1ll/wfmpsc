@@ -167,36 +167,8 @@ unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Sync
 {
 }
 
-/// Creates a MPSC queue with a custom allocator. The allocator must implement
-/// the core::alloc::Allocator interface. If you want to use the default system
-/// allocator, use [`mpscq!`].
-macro_rules! mpscq_alloc {
-    (
-        bitsize: $b:expr,
-        producers: $p:expr,
-        l1_cache: $l1:expr,
-        allocator: $alloc:expr
-    ) => {{
-        if $p * 4 > $l1 {
-            panic!("Too many producers! Maximum is L1_CACHE / 4. TODO");
-        }
-        use core::alloc::{Allocator, Layout};
-        let size = $l1 + ($p * $l1) + $p * (1 << $b);
-        let align = 1 << $b;
-        let layout = Layout::from_size_align(size, align).unwrap();
-        let queue = paste::paste! {
-            $alloc.allocate(layout).unwrap().as_ptr() as *mut
-            [<__MPSCQ $l1>]::<$p, $b,
-                // S = T * 2^C is the global buffer size
-                {$p * (1 << $b)},
-                // L = 2^C  is the thread-local capacity
-                {1 << $b}>
-        };
-        unsafe { queue.as_ref().unwrap() }
-    }};
-}
-
 /// Allocate an mpscq with the default system allocator.
+#[macro_export]
 macro_rules! mpscq {
     (
         bitsize: $capacity:expr,
@@ -220,6 +192,36 @@ pub mod nostd {
         alloc::{AllocError, Allocator, Layout},
         ptr::NonNull,
     };
+
+    /// Creates a MPSC queue with a custom allocator. The allocator must implement
+    /// the core::alloc::Allocator interface. If you want to use the default system
+    /// allocator, use [`mpscq!`].
+    #[macro_export]
+    macro_rules! mpscq_alloc {
+        (
+        bitsize: $b:expr,
+        producers: $p:expr,
+        l1_cache: $l1:expr,
+        allocator: $alloc:expr
+    ) => {{
+            if $p * 4 > $l1 {
+                panic!("Too many producers! Maximum is L1_CACHE / 4. TODO");
+            }
+            use core::alloc::{Allocator, Layout};
+            let size = $l1 + ($p * $l1) + $p * (1 << $b);
+            let align = 1 << $b;
+            let layout = Layout::from_size_align(size, align).unwrap();
+            let queue = paste::paste! {
+                $alloc.allocate(layout).unwrap().as_ptr() as *mut
+                [<__MPSCQ $l1>]::<$p, $b,
+                    // S = T * 2^C is the global buffer size
+                    {$p * (1 << $b)},
+                    // L = 2^C  is the thread-local capacity
+                    {1 << $b}>
+            };
+            unsafe { queue.as_ref().unwrap() }
+        }};
+    }
 
     /// A stub allocator that always returns them same given memory region.
     /// The region is given by START and SIZE parameter (address and length
@@ -257,7 +259,6 @@ mod test {
             allocator: alloc
         );
 
-        let c = no_std_queue.get_producer_handle(0);
-        c.push_single(42u8);
+        eprintln!("0x{:x}", no_std_queue as *const _ as usize);
     }
 }

@@ -5,6 +5,8 @@
  */
 
 #![feature(test)]
+#![feature(allocator_api)]
+
 extern crate test;
 
 #[cfg(test)]
@@ -14,21 +16,20 @@ mod _t {
 
     #[bench]
     fn eval_checked_fill(b: &mut Bencher) {
-        fill_mpscq();
-        // b.iter(|| {
-        //    black_box(fill_mpscq());
-        // })
+        b.iter(|| {
+           black_box(fill_mpscq());
+        })
     }
 
     fn fill_mpscq() {
         let mut handlers = vec![];
-        let queue = mpscq_alloc!(
+        let queue = mpscq!(
             bitsize: 16,
-            producers: 9,
+            producers: 8,
             l1_cache: 128
         );
-        for i in 0..9 {
-            let tlq = queue.thread_local_queue(i);
+        for i in 0..8 {
+            let tlq = queue.get_producer_handle(i);
             let tmp = std::thread::spawn(move || unsafe {
                 // fill the queue ffs
                 fill_mpscq_thread(i, tlq);

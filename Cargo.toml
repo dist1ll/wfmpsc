@@ -1,14 +1,20 @@
 [package]
 name = "wfmpsc"
 version = "0.1.0"
+license = "MPL-2.0"
+repository = "https://foss.alic.dev/dist1ll/wfmpsc"
+description = "Wait-free, cache-aware MPSC queue for serial output"
+autotests = false
 edition = "2021"
 
+[workspace]
+members = ["wfmpsc-proc"]
+
+
 [dependencies]
-# proc macro related
 paste = "1.0.9"
 
 [lib]
-name = "wfmpsc"
 doctest = false
 
 [[bench]]

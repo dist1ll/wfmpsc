@@ -14,3 +14,7 @@ version = "0.1.0"
 dependencies = [
  "paste",
 ]
+
+[[package]]
+name = "wfmpsc-proc"
+version = "0.1.0"
