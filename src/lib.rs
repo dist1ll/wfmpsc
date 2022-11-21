@@ -213,25 +213,27 @@ macro_rules! mpscq {
     }};
 }
 
-mod nostd {
+/// This module contains all #[no_std] compatible code.
+pub mod nostd {
 
     use core::{
         alloc::{AllocError, Allocator, Layout},
         ptr::NonNull,
     };
 
-    pub struct FixedAllocStub<const C: usize> {}
+    /// A stub allocator that always returns them same given memory region.
+    /// The region is given by START and SIZE parameter (address and length
+    /// of the memory region)
+    pub struct FixedAllocStub<const START: usize, const SIZE: usize>;
 
-    unsafe impl<const C: usize> Allocator for FixedAllocStub<C> {
+    unsafe impl<const START: usize, const SIZE: usize> Allocator for FixedAllocStub<START, SIZE> {
         fn allocate(&self, _: Layout) -> Result<NonNull<[u8]>, AllocError> {
-            match NonNull::new(C as *mut [u8]) {
-                None => Err(AllocError{}),
+            match NonNull::new(core::ptr::slice_from_raw_parts_mut(START as *mut u8, SIZE)) {
+                None => Err(AllocError {}),
                 Some(ptr) => Ok(ptr),
             }
         }
-        unsafe fn deallocate(&self, _: NonNull<u8>, _: Layout) {
-            todo!()
-        }
+        unsafe fn deallocate(&self, _: NonNull<u8>, _: Layout) {}
     }
 }
 
@@ -246,8 +248,7 @@ mod test {
             producers: 9,
             l1_cache: 128
         );
-
-        let alloc = std::alloc::System {};
+        let alloc = nostd::FixedAllocStub::<0x2ffff, 0x20000> {};
 
         let no_std_queue = mpscq_alloc!(
             bitsize: 16,
@@ -255,5 +256,8 @@ mod test {
             l1_cache: 128,
             allocator: alloc
         );
+
+        let c = no_std_queue.get_producer_handle(0);
+        c.push_single(42u8);
     }
 }
