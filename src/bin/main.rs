@@ -7,7 +7,6 @@ fn main() {
         producers: 9,
         l1_cache: 128
     );
-    
     mpscq.get_producer_handle(8);
 
 //    let alloc = nostd::FixedAllocStub::<0x2ffff, 0x20000> {};

@@ -181,9 +181,17 @@ macro_rules! queue {
         unsafe { queue.as_ref().unwrap() }
     }};
 }
-/// Creates a MPSC queue with a custom allocator. The allocator must implement
-/// the core::alloc::Allocator interface. If you want to use the default system
-/// allocator, use [`mpscq!`].
+
+/// Creates a MPSC queue with a custom allocator. 
+/// 
+/// Parameters: 
+///  - bitsize(usize): number of bits of queue capacity (1 <= b <= 32)
+///  - producers(usize): number of concurrent producers, usize
+///  - l1_cache(usize): byte size of L1 cache
+///  - allocator(Allocator): an allocator object, using Rust alloc API.
+/// 
+/// The allocator must implement the core::alloc::Allocator interface. If 
+/// you want to use the default system allocator, use [`queue!`].
 #[macro_export]
 macro_rules! queue_alloc {
     (
