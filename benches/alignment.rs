@@ -12,7 +12,7 @@ extern crate test;
 #[cfg(test)]
 mod _t {
     use test::{black_box, Bencher};
-    use wfmpsc::{queue, TLQ};
+    use wfmpsc::{queue, TLQ, ConsumerHandle};
 
     #[bench]
     fn eval_checked_fill(b: &mut Bencher) {
@@ -36,9 +36,15 @@ mod _t {
             });
             handlers.push(tmp);
         }
+        empty_mpscq_thread(queue.get_consumer_handle());
         for h in handlers {
             h.join().expect("Joining thread");
         }
+        // println!("{}", queue);
+    }
+
+    fn empty_mpscq_thread(c: impl ConsumerHandle) {
+        
     }
 
     fn fill_mpscq_thread<const C: usize, const L: usize>(qid: u8, tlq: TLQ<C, L>) {

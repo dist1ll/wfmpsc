@@ -7,11 +7,24 @@
 #![feature(allocator_api)]
 
 use core::fmt::Debug;
+use std::fmt::Display;
 pub use paste::paste;
 
+pub trait ConsumerHandle {
+    /// Remove a single byte from a producer with the given producer id.
+    fn pop_single(&self, pid: usize);
+}
 #[derive(Debug)]
-pub struct ConsumerHandle<const T: usize, const C: usize, const L: usize> {}
-unsafe impl<const T: usize, const C: usize, const L: usize> Send for ConsumerHandle<T, C, L> {}
+pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {}
+impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
+    for ConsumerHandleImpl<T, C, L>
+{
+    #[inline]
+    fn pop_single(&self, pid: usize) {
+        eprintln!("popping element from queue: {}", pid);
+    }
+}
+unsafe impl<const T: usize, const C: usize, const L: usize> Send for ConsumerHandleImpl<T, C, L> {}
 
 #[derive(Debug)]
 pub struct TLQ<const C: usize, const L: usize> {
@@ -105,33 +118,33 @@ macro_rules! create_aligned {
             const S: usize, // size of entire global buffer (T * 2^C)
             const L: usize> // size of thread-local buffer (2^C)
         {
+            buffer: [u8; S],
             tails: [<__Tails $ALIGN>]<T>,
             heads: [[<__Head $ALIGN>]; T],
-            buffer: [u8; S],
             dealloc: DeallocFn,
         }
 
         impl<'a,
             const T: usize, const C: usize, const S: usize, const L: usize>
             [<__MPSCQ $ALIGN>]<T, C, S, L> {
-                        /// Returns a TLQ handle. The only threads that are allowed to modify
+            /// Returns a TLQ handle. The only threads that are allowed to modify
             /// the data behind this TLQ are the consumer thread and the producer
-            /// thread with the given qid. Any other access is unsafe and may
+            /// thread with the given pid. Any other access is unsafe and may
             /// lead to critical failure!
-            pub fn get_producer_handle(&self, qid: u8) -> TLQ<C, L> {
-                assert!((qid as usize) < T);
+            pub fn get_producer_handle(&self, pid: u8) -> TLQ<C, L> {
+                assert!((pid as usize) < T);
                 TLQ::<C, L> {
-                    tail: ThreadLocalTail::new(&self.tails.0[qid as usize] as *const u32),
-                    head: ThreadLocalHead::new(&self.heads[qid as usize].0 as *const u32 as *mut u32),
+                    tail: ThreadLocalTail::new(&self.tails.0[pid as usize] as *const u32),
+                    head: ThreadLocalHead::new(&self.heads[pid as usize].0 as *const u32 as *mut u32),
                     buffer: ThreadLocalBuffer::<L>::new(
                             //
                             (&self.buffer as *const u8 as usize
-                                + {qid as usize * {1 << C}}) as *mut [u8; L]
+                                + {pid as usize * {1 << C}}) as *mut [u8; L]
                     ),
                 }
             }
-            pub fn get_consumer_handle(&self) -> ConsumerHandle<T, C, L> {
-                ConsumerHandle::<T, C, L> {
+            pub fn get_consumer_handle(&self) -> ConsumerHandleImpl<T, C, L> {
+                ConsumerHandleImpl::<T, C, L> {
 
                 }
             }
@@ -149,6 +162,11 @@ macro_rules! create_aligned {
     }
     )*)
 }
+
+// impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
+//     for __MPSCQ128<T, C, S, L>
+// {
+// }
 
 // Create types for common cache alignments
 create_aligned! {32, 64, 128}
