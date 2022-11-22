@@ -12,7 +12,7 @@ extern crate test;
 #[cfg(test)]
 mod _t {
     use test::{black_box, Bencher};
-    use wfmpsc::{mpscq, TLQ};
+    use wfmpsc::{queue, TLQ};
 
     #[bench]
     fn eval_checked_fill(b: &mut Bencher) {
@@ -23,7 +23,7 @@ mod _t {
 
     fn fill_mpscq() {
         let mut handlers = vec![];
-        let queue = mpscq!(
+        let queue = queue!(
             bitsize: 16,
             producers: 8,
             l1_cache: 128

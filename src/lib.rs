@@ -7,6 +7,7 @@
 #![feature(allocator_api)]
 
 use core::fmt::Debug;
+pub use paste::paste;
 
 #[derive(Debug)]
 pub struct ConsumerHandle<const T: usize, const C: usize, const L: usize> {}
@@ -154,7 +155,7 @@ create_aligned! {32, 64, 128}
 
 
 #[macro_export]
-macro_rules! mpscq {
+macro_rules! queue {
     (
         bitsize: $b:expr,
         producers: $p:expr,
@@ -168,7 +169,7 @@ macro_rules! mpscq {
         let align = 1 << $b;
         let layout = Layout::from_size_align(size, align).unwrap();
         let queue = unsafe {
-            paste::paste! {
+            wfmpsc::paste! {
                 std::alloc::alloc(layout) as *mut
                 wfmpsc::[<__MPSCQ $l1>]::<$p, $b,
                     // S = T * 2^C is the global buffer size
@@ -184,7 +185,7 @@ macro_rules! mpscq {
 /// the core::alloc::Allocator interface. If you want to use the default system
 /// allocator, use [`mpscq!`].
 #[macro_export]
-macro_rules! mpscq_alloc {
+macro_rules! queue_alloc {
     (
         bitsize: $b:expr,
         producers: $p:expr,

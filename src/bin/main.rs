@@ -2,7 +2,7 @@ use wfmpsc;
 
 fn main() {
 
-    let mpscq = wfmpsc::mpscq!(
+    let mpscq = wfmpsc::queue!(
         bitsize: 16,
         producers: 9,
         l1_cache: 128
