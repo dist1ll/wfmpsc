@@ -12,7 +12,7 @@ extern crate test;
 #[cfg(test)]
 mod _t {
     use test::{black_box, Bencher};
-    use wfmpsc::*;
+    use wfmpsc::{mpscq, TLQ};
 
     #[bench]
     fn eval_checked_fill(b: &mut Bencher) {

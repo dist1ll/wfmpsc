@@ -7,14 +7,14 @@ description = "Wait-free, cache-aware MPSC queue for serial output"
 autotests = false
 edition = "2021"
 
-[workspace]
-members = ["wfmpsc-proc"]
-
-
 [dependencies]
 paste = "1.0.9"
 
 [lib]
+doctest = false
+
+[[bin]]
+name = "main"
 doctest = false
 
 [[bench]]
