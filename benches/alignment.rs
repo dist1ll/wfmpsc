@@ -17,7 +17,7 @@ mod _t {
     #[bench]
     fn eval_checked_fill(b: &mut Bencher) {
         b.iter(|| {
-           black_box(fill_mpscq());
+            black_box(fill_mpscq());
         })
     }
 
