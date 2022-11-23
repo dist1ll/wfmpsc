@@ -7,13 +7,21 @@
 #![feature(allocator_api)]
 
 use core::fmt::Debug;
-use std::fmt::Display;
 pub use paste::paste;
+use std::fmt::Display;
+
+/// A queue reader allows producers to safely read data from a TLQ.
+#[derive(Debug, Clone, Copy)]
+pub struct QueueReader {}
 
 pub trait ConsumerHandle {
     /// Remove a single byte from a producer with the given producer id.
     fn pop_single(&self, pid: usize);
+
+    /// Returns an iterator over all producers that have data waiting to be read.
+    fn peek_producer(&self, pid: usize) -> Option<QueueReader>;
 }
+
 #[derive(Debug)]
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {}
 impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
@@ -22,6 +30,16 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
     #[inline]
     fn pop_single(&self, pid: usize) {
         eprintln!("popping element from queue: {}", pid);
+    }
+
+    /// Check if producer has data waiting. If it does, return a QueueReader
+    /// that lets you pop the data from queue.
+    fn peek_producer(&self, pid: usize) -> Option<QueueReader> {
+        let readers = [QueueReader {}; T];
+        /*
+
+        */
+        None
     }
 }
 unsafe impl<const T: usize, const C: usize, const L: usize> Send for ConsumerHandleImpl<T, C, L> {}
@@ -86,6 +104,12 @@ impl<const C: usize> ThreadLocalHead<C> {
             // is referencing always has 2^C capacity
             *self.0 = (*self.0 + amount) & ((1 << C) - 1) as u32;
         }
+    }
+}
+
+impl<const C: usize> Display for ThreadLocalHead<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        unsafe { write!(f, "{:?}", *self.0) }
     }
 }
 
@@ -163,10 +187,17 @@ macro_rules! create_aligned {
     )*)
 }
 
-// impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
-//     for __MPSCQ128<T, C, S, L>
-// {
-// }
+impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
+    for __MPSCQ128<T, C, S, L>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "heads: ")?;
+        for (idx, h) in self.heads.iter().enumerate() {
+            write!(f, "[#{}: {}] ", idx, h.0)?;
+        }
+        Ok(())
+    }
+}
 
 // Create types for common cache alignments
 create_aligned! {32, 64, 128}

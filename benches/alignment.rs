@@ -12,13 +12,14 @@ extern crate test;
 #[cfg(test)]
 mod _t {
     use test::{black_box, Bencher};
-    use wfmpsc::{queue, TLQ, ConsumerHandle};
+    use wfmpsc::{queue, ConsumerHandle, TLQ};
 
     #[bench]
     fn eval_checked_fill(b: &mut Bencher) {
-        b.iter(|| {
-            black_box(fill_mpscq());
-        })
+        fill_mpscq();
+        // b.iter(|| {
+        //     black_box(fill_mpscq());
+        // })
     }
 
     fn fill_mpscq() {
@@ -40,17 +41,15 @@ mod _t {
         for h in handlers {
             h.join().expect("Joining thread");
         }
-        // println!("{}", queue);
     }
 
     fn empty_mpscq_thread(c: impl ConsumerHandle) {
-        
+        loop {}
     }
 
     fn fill_mpscq_thread<const C: usize, const L: usize>(qid: u8, tlq: TLQ<C, L>) {
         for i in 0u64..((1u64 << C) - 1) {
-            tlq.push_single(1);
+            black_box(&tlq).push_single(i as u8);
         }
-        eprintln!("Thread #{}: I'm done!", qid);
     }
 }
