@@ -47,7 +47,7 @@ unsafe impl<const T: usize, const C: usize, const L: usize> Send for ConsumerHan
 #[derive(Debug)]
 pub struct TLQ<const C: usize, const L: usize> {
     pub head: ThreadLocalHead<C>,
-    pub tail: ThreadLocalTail<C>,
+    pub tail: ReadOnlyTail<C>,
     pub buffer: ThreadLocalBuffer<L>,
 }
 
@@ -77,9 +77,9 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 /// A tail that refers to the queue of a single, specific thread-local queue.
 /// The tail may only be modified safely by the consumer!
 #[derive(Debug)]
-pub struct ThreadLocalTail<const C: usize>(*const u32);
-impl<const C: usize> ThreadLocalTail<C> {}
-impl<const C: usize> ThreadLocalTail<C> {
+pub struct ReadOnlyTail<const C: usize>(*const u32);
+impl<const C: usize> ReadOnlyTail<C> {}
+impl<const C: usize> ReadOnlyTail<C> {
     pub fn new(ptr: *const u32) -> Self {
         Self { 0: ptr }
     }
@@ -158,7 +158,7 @@ macro_rules! create_aligned {
             pub fn get_producer_handle(&self, pid: u8) -> TLQ<C, L> {
                 assert!((pid as usize) < T);
                 TLQ::<C, L> {
-                    tail: ThreadLocalTail::new(&self.tails.0[pid as usize] as *const u32),
+                    tail: ReadOnlyTail::new(&self.tails.0[pid as usize] as *const u32),
                     head: ThreadLocalHead::new(&self.heads[pid as usize].0 as *const u32 as *mut u32),
                     buffer: ThreadLocalBuffer::<L>::new(
                             //
