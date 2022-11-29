@@ -18,6 +18,9 @@ pub trait ConsumerHandle {
     /// Remove a single byte from a producer with the given producer id.
     fn pop_single(&self, pid: usize);
 
+    /// Returns the number of producers
+    fn get_producer_count(&self) -> usize;
+
     /// Returns an iterator over all producers that have data waiting to be read.
     fn peek_producer(&self, pid: usize) -> Option<QueueReader>;
 }
@@ -40,6 +43,11 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
 
         */
         None
+    }
+    
+    #[inline(always)]
+    fn get_producer_count(&self) -> usize {
+        return T;
     }
 }
 unsafe impl<const T: usize, const C: usize, const L: usize> Send for ConsumerHandleImpl<T, C, L> {}
