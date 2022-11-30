@@ -37,14 +37,26 @@ mod _t {
             });
             handlers.push(tmp);
         }
-        empty_mpscq_thread(queue.get_consumer_handle());
+        empty_mpscq_thread(queue.get_consumer_handle(), 8 * (1 << 16));
         for h in handlers {
             h.join().expect("Joining thread");
         }
     }
 
-    fn empty_mpscq_thread(c: impl ConsumerHandle) {
-        loop {}
+    /// Blocking function that empties the MPSCQ until a total number of 
+    /// `elem_count` elements have been popped in total.
+    fn empty_mpscq_thread(c: impl ConsumerHandle, elem_count: usize) {
+        let mut counter: usize = 0;
+        let mut destination_buffer = [0u8; 256]; // uart dummy
+        loop {
+            if counter >= elem_count {
+                return;
+            }
+            for i in 0..c.get_producer_count() {
+                let written_bytes = c.pop_elements_into(i, 256, &mut destination_buffer);
+                counter += written_bytes;
+            }
+        }
     }
 
     fn fill_mpscq_thread<const C: usize, const L: usize>(qid: u8, tlq: TLQ<C, L>) {

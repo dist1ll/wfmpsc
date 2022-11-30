@@ -10,9 +10,21 @@ use core::fmt::Debug;
 pub use paste::paste;
 use std::fmt::Display;
 
+pub trait QueueReader {
+    fn copy_elements(&self, dst: &mut [u8]) -> usize;
+}
+
 /// A queue reader allows producers to safely read data from a TLQ.
 #[derive(Debug, Clone, Copy)]
-pub struct QueueReader {}
+pub struct QueueReaderImpl<const C: usize, const L: usize> {}
+
+impl<const C: usize, const L: usize> QueueReader for QueueReaderImpl<C, L> {
+    /// Copies elements to the given destination byte slice.
+    /// Returns the number of bytes that could be written to the slice.
+    fn copy_elements(&self, dst: &mut [u8]) -> usize {
+        0
+    }
+}
 
 pub trait ConsumerHandle {
     /// Remove a single byte from a producer with the given producer id.
@@ -21,9 +33,13 @@ pub trait ConsumerHandle {
     /// Returns the number of producers
     fn get_producer_count(&self) -> usize;
 
-    /// Returns an iterator over all producers that have data waiting to be read.
-    fn peek_producer(&self, pid: usize) -> Option<QueueReader>;
+    /// From the producer given by `pid`, read at most `max` elements from its local
+    /// queue, copies them into destination buffer `dst` and update the queue tail. 
+    /// Returns the number of elements that could be copied
+    fn pop_elements_into(&self, pid: usize, max: usize, dst: &mut [u8]) -> usize;
 }
+
+pub struct QueueReaderIter {}
 
 #[derive(Debug)]
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {}
@@ -35,16 +51,10 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
         eprintln!("popping element from queue: {}", pid);
     }
 
-    /// Check if producer has data waiting. If it does, return a QueueReader
-    /// that lets you pop the data from queue.
-    fn peek_producer(&self, pid: usize) -> Option<QueueReader> {
-        let readers = [QueueReader {}; T];
-        /*
-
-        */
-        None
+    fn pop_elements_into(&self, pid: usize, max: usize, dst: &mut [u8]) -> usize {
+        0
     }
-    
+
     #[inline(always)]
     fn get_producer_count(&self) -> usize {
         return T;
