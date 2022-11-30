@@ -10,21 +10,6 @@ use core::fmt::Debug;
 pub use paste::paste;
 use std::fmt::Display;
 
-pub trait QueueReader {
-    fn copy_elements(&self, dst: &mut [u8]) -> usize;
-}
-
-/// A queue reader allows producers to safely read data from a TLQ.
-#[derive(Debug, Clone, Copy)]
-pub struct QueueReaderImpl<const C: usize, const L: usize> {}
-
-impl<const C: usize, const L: usize> QueueReader for QueueReaderImpl<C, L> {
-    /// Copies elements to the given destination byte slice.
-    /// Returns the number of bytes that could be written to the slice.
-    fn copy_elements(&self, dst: &mut [u8]) -> usize {
-        0
-    }
-}
 
 pub trait ConsumerHandle {
     /// Remove a single byte from a producer with the given producer id.
@@ -38,8 +23,6 @@ pub trait ConsumerHandle {
     /// Returns the number of elements that could be copied
     fn pop_elements_into(&self, pid: usize, max: usize, dst: &mut [u8]) -> usize;
 }
-
-pub struct QueueReaderIter {}
 
 #[derive(Debug)]
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {}
