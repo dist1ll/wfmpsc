@@ -10,7 +10,7 @@ use core::fmt::Debug;
 pub use paste::paste;
 use std::fmt::Display;
 
-
+/// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
     /// Remove a single byte from a producer with the given producer id.
     fn pop_single(&self, pid: usize);
@@ -19,13 +19,14 @@ pub trait ConsumerHandle {
     fn get_producer_count(&self) -> usize;
 
     /// From the producer given by `pid`, read at most `max` elements from its local
-    /// queue, copies them into destination buffer `dst` and update the queue tail. 
+    /// queue, copies them into destination buffer `dst` and update the queue tail.
     /// Returns the number of elements that could be copied
     fn pop_elements_into(&self, pid: usize, max: usize, dst: &mut [u8]) -> usize;
 }
 
-#[derive(Debug)]
-pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {}
+pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {
+    tails: RWTails<T>,
+}
 impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
     for ConsumerHandleImpl<T, C, L>
 {
@@ -75,11 +76,19 @@ impl<const L: usize> ThreadLocalBuffer<L> {
     }
 }
 
+/// A read & write acces to all tails of the MPSCQ. This may only be accessed
+/// and modified by a single consumer.
+pub struct RWTails<const T: usize>(*mut [u32; T]);
+impl<const T: usize> RWTails<T> {
+    pub fn new(ptr: *mut [u32; T]) -> Self {
+        Self { 0: ptr }
+    }
+}
+
 /// A tail that refers to the queue of a single, specific thread-local queue.
 /// The tail may only be modified safely by the consumer!
 #[derive(Debug)]
 pub struct ReadOnlyTail<const C: usize>(*const u32);
-impl<const C: usize> ReadOnlyTail<C> {}
 impl<const C: usize> ReadOnlyTail<C> {
     pub fn new(ptr: *const u32) -> Self {
         Self { 0: ptr }
@@ -170,7 +179,7 @@ macro_rules! create_aligned {
             }
             pub fn get_consumer_handle(&self) -> ConsumerHandleImpl<T, C, L> {
                 ConsumerHandleImpl::<T, C, L> {
-
+                        tails: RWTails::<T>::new(&self.tails.0 as *const [u32; T] as *mut [u32; T]),
                 }
             }
         }
