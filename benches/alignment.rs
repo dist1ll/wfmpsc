@@ -24,7 +24,7 @@ mod _t {
 
     fn fill_mpscq() {
         let mut handlers = vec![];
-        let queue = queue!(
+        let mut queue = queue!(
             bitsize: 16,
             producers: 8,
             l1_cache: 128
@@ -53,7 +53,7 @@ mod _t {
                 return;
             }
             for i in 0..c.get_producer_count() {
-                let written_bytes = c.pop_elements_into(i, 256, &mut destination_buffer);
+                let written_bytes = c.pop_elements_into(i, &mut destination_buffer);
                 counter += written_bytes;
             }
         }

@@ -18,10 +18,10 @@ pub trait ConsumerHandle {
     /// Returns the number of producers
     fn get_producer_count(&self) -> usize;
 
-    /// From the producer given by `pid`, read at most `max` elements from its local
+    /// From the producer given by `pid`, read at most `dst.len()` elements from its local
     /// queue, copies them into destination buffer `dst` and update the queue tail.
     /// Returns the number of elements that could be copied
-    fn pop_elements_into(&self, pid: usize, max: usize, dst: &mut [u8]) -> usize;
+    fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize;
 }
 
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {
@@ -35,7 +35,12 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
         eprintln!("popping element from queue: {}", pid);
     }
 
-    fn pop_elements_into(&self, pid: usize, max: usize, dst: &mut [u8]) -> usize {
+    fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
+        // let tlq_len = self.heads[pid] - self.tails.get(pid);
+        // let write_len = std::cmp::min(tlq_len, dst.len());
+        
+        // self.tails.increment(pid, write_len);
+        // write_len
         0
     }
 
@@ -165,11 +170,11 @@ macro_rules! create_aligned {
             /// the data behind this TLQ are the consumer thread and the producer
             /// thread with the given pid. Any other access is unsafe and may
             /// lead to critical failure!
-            pub fn get_producer_handle(&self, pid: u8) -> TLQ<C, L> {
+            pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
                 assert!((pid as usize) < T);
                 TLQ::<C, L> {
-                    tail: ReadOnlyTail::new(&self.tails.0[pid as usize] as *const u32),
-                    head: ThreadLocalHead::new(&self.heads[pid as usize].0 as *const u32 as *mut u32),
+                    tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *const u32),
+                    head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *const u32 as *mut u32),
                     buffer: ThreadLocalBuffer::<L>::new(
                             //
                             (&self.buffer as *const u8 as usize
@@ -177,9 +182,11 @@ macro_rules! create_aligned {
                     ),
                 }
             }
-            pub fn get_consumer_handle(&self) -> ConsumerHandleImpl<T, C, L> {
+            /// Returns a consumer handle. This allows a single thread to pop data
+            /// from the other producers in a safe way. 
+            pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, L> {
                 ConsumerHandleImpl::<T, C, L> {
-                        tails: RWTails::<T>::new(&self.tails.0 as *const [u32; T] as *mut [u32; T]),
+                        tails: RWTails::<T>::new(&mut self.tails.0 as *const [u32; T] as *mut [u32; T]),
                 }
             }
         }
@@ -244,7 +251,7 @@ macro_rules! queue {
                     {1 << $b}>
             }
         };
-        unsafe { queue.as_ref().unwrap() }
+        unsafe { queue.as_mut().unwrap() }
     }};
 }
 
