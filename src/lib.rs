@@ -173,11 +173,11 @@ macro_rules! create_aligned {
             pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
                 assert!((pid as usize) < T);
                 TLQ::<C, L> {
-                    tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *const u32),
-                    head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *const u32 as *mut u32),
+                    tail: ReadOnlyTail::new(&self.tails.0[pid as usize] as *const u32),
+                    head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut u32),
                     buffer: ThreadLocalBuffer::<L>::new(
                             //
-                            (&self.buffer as *const u8 as usize
+                            (&mut self.buffer as *mut u8 as usize
                                 + {pid as usize * {1 << C}}) as *mut [u8; L]
                     ),
                 }
@@ -186,7 +186,7 @@ macro_rules! create_aligned {
             /// from the other producers in a safe way. 
             pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, L> {
                 ConsumerHandleImpl::<T, C, L> {
-                        tails: RWTails::<T>::new(&mut self.tails.0 as *const [u32; T] as *mut [u32; T]),
+                        tails: RWTails::<T>::new(&mut self.tails.0 as *mut [u32; T]),
                 }
             }
         }
@@ -288,7 +288,7 @@ macro_rules! queue_alloc {
                 // L = 2^C  is the thread-local capacity
                 {1 << $b}>
         };
-        unsafe { queue.as_ref().unwrap() }
+        unsafe { queue.as_mut().unwrap() }
     }};
 }
 
