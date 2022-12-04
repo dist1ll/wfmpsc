@@ -5,6 +5,7 @@
  */
 
 use wfmpsc;
+use wfmpsc::ConsumerHandle;
 
 fn main() {
 
@@ -14,5 +15,10 @@ fn main() {
         l1_cache: 128
     );
     
-    mpscq.get_producer_handle(8);
+    let consumer = mpscq.get_consumer_handle();
+    drop(mpscq);
+    // mpscq dropped, consumer is not valid anymore!!
+
+    let count = consumer.get_producer_count();
+    println!("consumer count: {}", count);
 }

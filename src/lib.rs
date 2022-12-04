@@ -24,13 +24,13 @@ pub trait ConsumerHandle {
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize;
 }
 
-pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {
-    tails: RWTails<T>,
+pub struct ConsumerHandleImpl<'a, const T: usize, const C: usize, const L: usize> {
+    tails: RWTails<'a, T>,
     heads: [ReadOnlyHead<C>; T],
 }
 
-impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
-    for ConsumerHandleImpl<T, C, L>
+impl<'a, const T: usize, const C: usize, const L: usize> ConsumerHandle
+    for ConsumerHandleImpl<'a, T, C, L>
 {
     #[inline]
     fn pop_single(&self, pid: usize) {
@@ -51,7 +51,7 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
         return T;
     }
 }
-unsafe impl<const T: usize, const C: usize, const L: usize> Send for ConsumerHandleImpl<T, C, L> {}
+unsafe impl<'a, const T: usize, const C: usize, const L: usize> Send for ConsumerHandleImpl<'a, T, C, L> {}
 
 #[derive(Debug)]
 pub struct TLQ<const C: usize, const L: usize> {
@@ -85,9 +85,9 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-pub struct RWTails<const T: usize>(*mut [u32; T]);
-impl<const T: usize> RWTails<T> {
-    pub fn new(ptr: *mut [u32; T]) -> Self {
+pub struct RWTails<'a, const T: usize>(&'a mut [u32; T]);
+impl<'a, const T: usize> RWTails<'a, T> {
+    pub fn new(ptr: &'a mut [u32; T]) -> Self {
         Self { 0: ptr }
     }
 }
@@ -175,8 +175,7 @@ macro_rules! create_aligned {
             dealloc: DeallocFn,
         }
 
-        impl<'a,
-            const T: usize, const C: usize, const S: usize, const L: usize>
+        impl<const T: usize, const C: usize, const S: usize, const L: usize>
             [<__MPSCQ $ALIGN>]<T, C, S, L> {
             /// Returns a TLQ handle. The only threads that are allowed to modify
             /// the data behind this TLQ are the consumer thread and the producer
@@ -196,13 +195,13 @@ macro_rules! create_aligned {
             }
             /// Returns a consumer handle. This allows a single thread to pop data
             /// from the other producers in a safe way.
-            pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, L> {
+            pub fn get_consumer_handle<'a>(&'a mut self) -> ConsumerHandleImpl<'a, T, C, L> {
                 let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
                 for i in 0..T {
                     heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const u32);
                 }
                 ConsumerHandleImpl::<T, C, L> {
-                        tails: RWTails::<T>::new(&mut self.tails.0 as *mut [u32; T]),
+                        tails: RWTails::<T>::new(&mut self.tails.0),
                         heads,
                 }
             }
