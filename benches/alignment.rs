@@ -50,6 +50,7 @@ mod _t {
         let mut destination_buffer = [0u8; 256]; // uart dummy
         loop {
             if counter >= elem_count {
+                println!("I read more than {} bytes! Consumer done.", elem_count);
                 return;
             }
             for i in 0..c.get_producer_count() {

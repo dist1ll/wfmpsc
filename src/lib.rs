@@ -26,7 +26,9 @@ pub trait ConsumerHandle {
 
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {
     tails: RWTails<T>,
+    heads: [ReadOnlyHead<C>; T],
 }
+
 impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
     for ConsumerHandleImpl<T, C, L>
 {
@@ -38,10 +40,10 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         // let tlq_len = self.heads[pid] - self.tails.get(pid);
         // let write_len = std::cmp::min(tlq_len, dst.len());
-        
+
         // self.tails.increment(pid, write_len);
         // write_len
-        0
+        1
     }
 
     #[inline(always)]
@@ -91,10 +93,20 @@ impl<const T: usize> RWTails<T> {
 }
 
 /// A tail that refers to the queue of a single, specific thread-local queue.
-/// The tail may only be modified safely by the consumer!
+/// This is a read-only view! The tail may only be modified safely by the consumer.
 #[derive(Debug)]
 pub struct ReadOnlyTail<const C: usize>(*const u32);
 impl<const C: usize> ReadOnlyTail<C> {
+    pub fn new(ptr: *const u32) -> Self {
+        Self { 0: ptr }
+    }
+}
+
+/// A head that refers to the queue of a single, specific thread-local queue.
+/// This is a read-only view! The tail may only be modified safely by the producer.
+#[derive(Debug)]
+pub struct ReadOnlyHead<const C: usize>(*const u32);
+impl<const C: usize> ReadOnlyHead<C> {
     pub fn new(ptr: *const u32) -> Self {
         Self { 0: ptr }
     }
@@ -183,10 +195,15 @@ macro_rules! create_aligned {
                 }
             }
             /// Returns a consumer handle. This allows a single thread to pop data
-            /// from the other producers in a safe way. 
+            /// from the other producers in a safe way.
             pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, L> {
+                let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
+                for i in 0..T {
+                    heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const u32);
+                }
                 ConsumerHandleImpl::<T, C, L> {
                         tails: RWTails::<T>::new(&mut self.tails.0 as *mut [u32; T]),
+                        heads,
                 }
             }
         }
