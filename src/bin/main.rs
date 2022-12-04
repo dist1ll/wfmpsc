@@ -8,17 +8,17 @@ use wfmpsc;
 use wfmpsc::ConsumerHandle;
 
 fn main() {
+    call();
+}
+fn call() {
 
     let mpscq = wfmpsc::queue!(
         bitsize: 16,
         producers: 9,
         l1_cache: 128
     );
-    
+
     let consumer = mpscq.get_consumer_handle();
     drop(mpscq);
-    // mpscq dropped, consumer is not valid anymore!!
-
-    let count = consumer.get_producer_count();
-    println!("consumer count: {}", count);
+    consumer.pop_single(0);
 }
