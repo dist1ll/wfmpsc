@@ -26,7 +26,7 @@ pub trait ConsumerHandle {
 
 pub struct ConsumerHandleImpl<'a, const T: usize, const C: usize, const L: usize> {
     tails: RWTails<'a, T>,
-    heads: [ReadOnlyHead<C>; T],
+    heads: [ReadOnlyHead<'a, C>; T],
 }
 
 impl<'a, const T: usize, const C: usize, const L: usize> ConsumerHandle
@@ -105,9 +105,9 @@ impl<const C: usize> ReadOnlyTail<C> {
 /// A head that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the producer.
 #[derive(Debug)]
-pub struct ReadOnlyHead<const C: usize>(*const u32);
-impl<const C: usize> ReadOnlyHead<C> {
-    pub fn new(ptr: *const u32) -> Self {
+pub struct ReadOnlyHead<'a, const C: usize>(&'a u32);
+impl<'a, const C: usize> ReadOnlyHead<'a, C> {
+    pub fn new(ptr: &'a u32) -> Self {
         Self { 0: ptr }
     }
 }
@@ -198,7 +198,7 @@ macro_rules! create_aligned {
             pub fn get_consumer_handle<'a>(&'a mut self) -> ConsumerHandleImpl<'a, T, C, L> {
                 let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
                 for i in 0..T {
-                    heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const u32);
+                    heads[i] = ReadOnlyHead::new(&self.heads[i].0);
                 }
                 ConsumerHandleImpl::<T, C, L> {
                         tails: RWTails::<T>::new(&mut self.tails.0),
