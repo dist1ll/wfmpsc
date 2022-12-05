@@ -18,7 +18,8 @@ fn call() {
         l1_cache: 128
     );
 
-    let consumer = mpscq.get_consumer_handle();
-    drop(mpscq);
-    consumer.pop_single(0);
+    let mut safetobeshared = core::cell::UnsafeCell::new(mpscq);
+    let x = safetobeshared.get_mut();
+    let y = safetobeshared.get_mut();
+    
 }

@@ -24,13 +24,14 @@ pub trait ConsumerHandle {
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize;
 }
 
-pub struct ConsumerHandleImpl<const T: usize, const C: usize, const L: usize> {
+pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, const L: usize> {
     tails: RWTails<T>,
     heads: [ReadOnlyHead<C>; T],
+    buffer: ReadOnlyBuffer<S>,
 }
 
-impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
-    for ConsumerHandleImpl<T, C, L>
+impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHandle
+    for ConsumerHandleImpl<T, C, S, L>
 {
     #[inline]
     fn pop_single(&self, pid: usize) {
@@ -38,12 +39,18 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
     }
 
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
-        // let tlq_len = self.heads[pid] - self.tails.get(pid);
-        // let write_len = std::cmp::min(tlq_len, dst.len());
+        debug_assert!(
+            dst.len() < u32::MAX as usize,
+            "Max buffer size is 2^32 bytes"
+        );
+        let tlq_len = unsafe { *self.heads[pid].0 - self.tails.get(pid) } as usize;
+        let write_len = core::cmp::min(tlq_len, dst.len());
 
+        unsafe {
+            // core::ptr::copy_nonoverlapping(src, dst, write_len);
+        }
         // self.tails.increment(pid, write_len);
-        // write_len
-        1
+        write_len
     }
 
     #[inline(always)]
@@ -51,7 +58,10 @@ impl<const T: usize, const C: usize, const L: usize> ConsumerHandle
         return T;
     }
 }
-unsafe impl<const T: usize, const C: usize, const L: usize> Send for ConsumerHandleImpl<T, C, L> {}
+unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
+    for ConsumerHandleImpl<T, C, S, L>
+{
+}
 
 #[derive(Debug)]
 pub struct TLQ<const C: usize, const L: usize> {
@@ -90,6 +100,11 @@ impl<const T: usize> RWTails<T> {
     pub fn new(ptr: *mut [u32; T]) -> Self {
         Self { 0: ptr }
     }
+    #[inline(always)]
+    pub fn get(&self, pid: usize) -> u32 {
+        // TODO: Check that pointer arithmetics don't outperform this
+        unsafe { (*self.0)[pid] }
+    }
 }
 
 /// A tail that refers to the queue of a single, specific thread-local queue.
@@ -108,6 +123,15 @@ impl<const C: usize> ReadOnlyTail<C> {
 pub struct ReadOnlyHead<const C: usize>(*const u32);
 impl<const C: usize> ReadOnlyHead<C> {
     pub fn new(ptr: *const u32) -> Self {
+        Self { 0: ptr }
+    }
+}
+
+/// A read-only view on the entire MPSC queue buffer.
+#[derive(Debug)]
+pub struct ReadOnlyBuffer<const S: usize>(*const [u8; S]);
+impl<const S: usize> ReadOnlyBuffer<S> {
+    pub fn new(ptr: *const [u8; S]) -> Self {
         Self { 0: ptr }
     }
 }
@@ -188,7 +212,6 @@ macro_rules! create_aligned {
                     tail: ReadOnlyTail::new(&self.tails.0[pid as usize] as *const u32),
                     head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut u32),
                     buffer: ThreadLocalBuffer::<L>::new(
-                            //
                             (&mut self.buffer as *mut u8 as usize
                                 + {pid as usize * {1 << C}}) as *mut [u8; L]
                     ),
@@ -196,14 +219,15 @@ macro_rules! create_aligned {
             }
             /// Returns a consumer handle. This allows a single thread to pop data
             /// from the other producers in a safe way.
-            pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, L> {
+            pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, S, L> {
                 let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
                 for i in 0..T {
                     heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const u32);
                 }
-                ConsumerHandleImpl::<T, C, L> {
+                ConsumerHandleImpl::<T, C, S, L> {
                         tails: RWTails::<T>::new(&mut self.tails.0 as *mut [u32; T]),
                         heads,
+                        buffer: ReadOnlyBuffer::<S>::new(&self.buffer as *const [u8; S])
                 }
             }
         }
