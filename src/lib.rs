@@ -25,7 +25,7 @@ pub trait ConsumerHandle {
 }
 
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, const L: usize> {
-    tails: RWTails<T>,
+    tails: RWTails<T, C>,
     heads: [ReadOnlyHead<C>; T],
     buffer: ReadOnlyBuffer<S>,
 }
@@ -45,7 +45,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
         unsafe {
             // core::ptr::copy_nonoverlapping(src, dst, write_len);
         }
-        // self.tails.increment(pid, write_len);
+        self.tails.increment(pid, write_len as u32);
         write_len
     }
 
@@ -91,8 +91,8 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-pub struct RWTails<const T: usize>(*mut [u32; T]);
-impl<const T: usize> RWTails<T> {
+pub struct RWTails<const T: usize, const C: usize>(*mut [u32; T]);
+impl<const T: usize, const C: usize> RWTails<T, C> {
     pub fn new(ptr: *mut [u32; T]) -> Self {
         Self { 0: ptr }
     }
@@ -100,6 +100,13 @@ impl<const T: usize> RWTails<T> {
     pub fn get(&self, pid: usize) -> u32 {
         // TODO: Check that pointer arithmetics don't outperform this
         unsafe { (*self.0)[pid] }
+    }
+    #[inline(always)]
+    pub fn increment(&self, pid: usize, len: u32) {
+        unsafe {
+            // Bitmask wrap increment, using bitwidth of queue C
+            (*self.0)[pid] = ((*self.0)[pid] + len) & ((C - 1) as u32);
+        }
     }
 }
 
@@ -221,15 +228,14 @@ macro_rules! create_aligned {
                     heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const u32);
                 }
                 ConsumerHandleImpl::<T, C, S, L> {
-                        tails: RWTails::<T>::new(&mut self.tails.0 as *mut [u32; T]),
+                        tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [u32; T]),
                         heads,
                         buffer: ReadOnlyBuffer::<S>::new(&self.buffer as *const [u8; S])
                 }
             }
         }
         // Run custom deallocator!
-        impl<const T: usize, const C: usize,
-             const S: usize, const L: usize>
+        impl<const T: usize, const C: usize, const S: usize, const L: usize>
             Drop for [<__MPSCQ $ALIGN>]<T, C, S, L>
         {
             fn drop(&mut self) {
