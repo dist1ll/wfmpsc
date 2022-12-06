@@ -39,10 +39,6 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
     }
 
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
-        debug_assert!(
-            dst.len() < u32::MAX as usize,
-            "Max buffer size is 2^32 bytes"
-        );
         let tlq_len = unsafe { *self.heads[pid].0 - self.tails.get(pid) } as usize;
         let write_len = core::cmp::min(tlq_len, dst.len());
 
