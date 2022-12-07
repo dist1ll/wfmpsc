@@ -5,13 +5,12 @@
  */
 
 use wfmpsc;
-use wfmpsc::ConsumerHandle;
 
 fn main() {
     call();
 }
-fn call() {
 
+fn call() {
     let mpscq = wfmpsc::queue!(
         bitsize: 16,
         producers: 9,
@@ -21,5 +20,4 @@ fn call() {
     let mut safetobeshared = core::cell::UnsafeCell::new(mpscq);
     let x = safetobeshared.get_mut();
     let y = safetobeshared.get_mut();
-    
 }

@@ -27,7 +27,7 @@ pub trait ConsumerHandle {
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, const L: usize> {
     tails: RWTails<T, C>,
     heads: [ReadOnlyHead<C>; T],
-    buffer: ReadOnlyBuffer<S>,
+    buffer: ReadOnlyBuffer<T, S, L>,
 }
 
 impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHandle
@@ -132,10 +132,24 @@ impl<const C: usize> ReadOnlyHead<C> {
 
 /// A read-only view on the entire MPSC queue buffer.
 #[derive(Debug)]
-pub struct ReadOnlyBuffer<const S: usize>(*const [u8; S]);
-impl<const S: usize> ReadOnlyBuffer<S> {
+pub struct ReadOnlyBuffer<const T: usize, const S: usize, const L: usize>(*const [u8; S]);
+impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     pub fn new(ptr: *const [u8; S]) -> Self {
         Self { 0: ptr }
+    }
+    /// Returns raw byte slice that points to the TLQ backing array with the
+    /// specified producer id.
+    #[inline(always)]
+    pub fn get_tlq_slice(&self, pid: usize) -> &[u8; L] {
+        // TODO: Check for assembly optimizations here
+        debug_assert!(
+            pid < T,
+            "this queue has {} producers, but you selected a too large pid={}",
+            T,
+            pid
+        );
+        let tlq_ptr = (self.0 as usize + pid * L) as *const [u8; L];
+        unsafe { tlq_ptr.as_ref().unwrap() }
     }
 }
 
@@ -230,7 +244,7 @@ macro_rules! create_aligned {
                 ConsumerHandleImpl::<T, C, S, L> {
                         tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [u32; T]),
                         heads,
-                        buffer: ReadOnlyBuffer::<S>::new(&self.buffer as *const [u8; S])
+                        buffer: ReadOnlyBuffer::<T, S, L>::new(&self.buffer as *const [u8; S])
                 }
             }
         }
