@@ -107,7 +107,6 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
     pub fn increment(&self, pid: usize, len: u32) {
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
-            println!("wrapper: {:x}", ((1 << C) - 1));
             (*self.0)[pid] = ((*self.0)[pid] + len) & (((1 << C) - 1) as u32);
         }
     }
