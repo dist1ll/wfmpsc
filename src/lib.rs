@@ -39,11 +39,13 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
     }
 
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
-        let tlq_len = unsafe { *self.heads[pid].0 - self.tails.get(pid) } as usize;
-        let write_len = core::cmp::min(tlq_len, dst.len());
-
+        let tail = self.tails.get(pid);
+        let data_len = unsafe { *self.heads[pid].0 - tail } as usize;
+        let write_len = core::cmp::min(data_len, dst.len());
+        let tlq_base_ptr = self.buffer.get_tlq_slice(pid) as *const u8;
+        let src = ((tlq_base_ptr as usize) + tail as usize) as *const u8;
         unsafe {
-            // core::ptr::copy_nonoverlapping(src, dst, write_len);
+            core::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), write_len);
         }
         self.tails.increment(pid, write_len as u32);
         write_len
@@ -105,7 +107,8 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
     pub fn increment(&self, pid: usize, len: u32) {
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
-            (*self.0)[pid] = ((*self.0)[pid] + len) & ((C - 1) as u32);
+            println!("wrapper: {:x}", ((1 << C) - 1));
+            (*self.0)[pid] = ((*self.0)[pid] + len) & (((1 << C) - 1) as u32);
         }
     }
 }
@@ -141,13 +144,13 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     /// specified producer id.
     #[inline(always)]
     pub fn get_tlq_slice(&self, pid: usize) -> &[u8; L] {
-        // TODO: Check for assembly optimizations here
         debug_assert!(
             pid < T,
             "this queue has {} producers, but you selected a too large pid={}",
             T,
             pid
         );
+        // TODO: Check for assembly optimizations here
         let tlq_ptr = (self.0 as usize + pid * L) as *const [u8; L];
         unsafe { tlq_ptr.as_ref().unwrap() }
     }

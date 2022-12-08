@@ -37,7 +37,7 @@ mod _t {
             });
             handlers.push(tmp);
         }
-        empty_mpscq_thread(queue.get_consumer_handle(), 8 * (1 << 16));
+        empty_mpscq_thread(queue.get_consumer_handle(), 8 * ((1 << 16) - 1));
         for h in handlers {
             h.join().expect("Joining thread");
         }
@@ -47,7 +47,7 @@ mod _t {
     /// `elem_count` elements have been popped in total.
     fn empty_mpscq_thread(c: impl ConsumerHandle, elem_count: usize) {
         let mut counter: usize = 0;
-        let mut destination_buffer = [0u8; 256]; // uart dummy
+        let mut destination_buffer = [0u8; 65536]; // uart dummy
         loop {
             if counter >= elem_count {
                 println!("I read more than {} bytes! Consumer done.", elem_count);
