@@ -16,10 +16,10 @@ mod _t {
 
     #[bench]
     fn eval_checked_fill(b: &mut Bencher) {
-        fill_mpscq();
-        // b.iter(|| {
-        //     black_box(fill_mpscq());
-        // })
+        // fill_mpscq();
+        b.iter(|| {
+            black_box(fill_mpscq());
+        })
     }
 
     fn fill_mpscq() {
@@ -43,14 +43,17 @@ mod _t {
         }
     }
 
-    /// Blocking function that empties the MPSCQ until a total number of 
+    /// Blocking function that empties the MPSCQ until a total number of
     /// `elem_count` elements have been popped in total.
     fn empty_mpscq_thread(c: impl ConsumerHandle, elem_count: usize) {
         let mut counter: usize = 0;
         let mut destination_buffer = [0u8; 65536]; // uart dummy
+
+        unsafe {
+            std::arch::asm!("nop");
+        }
         loop {
             if counter >= elem_count {
-                println!("I read more than {} bytes! Consumer done.", elem_count);
                 return;
             }
             for i in 0..c.get_producer_count() {

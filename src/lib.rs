@@ -8,7 +8,10 @@
 
 use core::fmt::Debug;
 pub use paste::paste;
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    sync::atomic::{compiler_fence, AtomicU32, Ordering},
+};
 
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
@@ -40,10 +43,10 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
 
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.get(pid);
-        let data_len = unsafe { *self.heads[pid].0 - tail } as usize;
+        let data_len = (self.heads[pid].read_atomic_acq() - tail) as usize;
         let write_len = core::cmp::min(data_len, dst.len());
-        let tlq_base_ptr = self.buffer.get_tlq_slice(pid) as *const u8;
-        let src = ((tlq_base_ptr as usize) + tail as usize) as *const u8;
+        let tlq_base_ptr = self.buffer.get_tlq_slice(pid);
+        let src = ((tlq_base_ptr as usize) + tail as usize) as *mut u8;
         unsafe {
             core::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), write_len);
         }
@@ -105,6 +108,9 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
     }
     #[inline(always)]
     pub fn increment(&self, pid: usize, len: u32) {
+        // NOTE: We don't need CAS or LL/SC because we are the only thread that's
+        // performing STORE operations on this memory address.
+        // TODO: Implement the atomic store
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
             (*self.0)[pid] = ((*self.0)[pid] + len) & (((1 << C) - 1) as u32);
@@ -115,34 +121,52 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
 /// A tail that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the consumer.
 #[derive(Debug)]
-pub struct ReadOnlyTail<const C: usize>(*const u32);
+pub struct ReadOnlyTail<const C: usize>(*mut u32);
 impl<const C: usize> ReadOnlyTail<C> {
-    pub fn new(ptr: *const u32) -> Self {
+    pub fn new(ptr: *mut u32) -> Self {
         Self { 0: ptr }
+    }
+    /// Performs an atomic read on the tail with acquire semantics, as the value 
+    /// is expected to be written to from the consumer. 
+    #[inline(always)]
+    pub fn read_atomic_acq(&self) -> u32 {
+        unsafe {
+            let atomic = &*(self.0 as *const AtomicU32);
+            atomic.load(Ordering::Acquire)
+        }
     }
 }
 
 /// A head that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the producer.
 #[derive(Debug)]
-pub struct ReadOnlyHead<const C: usize>(*const u32);
+pub struct ReadOnlyHead<const C: usize>(*mut u32);
 impl<const C: usize> ReadOnlyHead<C> {
-    pub fn new(ptr: *const u32) -> Self {
+    pub fn new(ptr: *mut u32) -> Self {
         Self { 0: ptr }
+    }
+    /// Performs an atomic read on the head with acquire semantics, as the value 
+    /// is expected to be written to from the producer.
+    #[inline(always)]
+    pub fn read_atomic_acq(&self) -> u32 {
+        unsafe {
+            let atomic = &*(self.0 as *const AtomicU32);
+            atomic.load(Ordering::Acquire)
+        }
     }
 }
 
 /// A read-only view on the entire MPSC queue buffer.
 #[derive(Debug)]
-pub struct ReadOnlyBuffer<const T: usize, const S: usize, const L: usize>(*const [u8; S]);
+pub struct ReadOnlyBuffer<const T: usize, const S: usize, const L: usize>(*mut [u8; S]);
 impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
-    pub fn new(ptr: *const [u8; S]) -> Self {
+    pub fn new(ptr: *mut [u8; S]) -> Self {
         Self { 0: ptr }
     }
     /// Returns raw byte slice that points to the TLQ backing array with the
     /// specified producer id.
     #[inline(always)]
-    pub fn get_tlq_slice(&self, pid: usize) -> &[u8; L] {
+    pub fn get_tlq_slice(&self, pid: usize) -> *mut u8 {
         debug_assert!(
             pid < T,
             "this queue has {} producers, but you selected a too large pid={}",
@@ -150,8 +174,7 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
             pid
         );
         // TODO: Check for assembly optimizations here
-        let tlq_ptr = (self.0 as usize + pid * L) as *const [u8; L];
-        unsafe { tlq_ptr.as_ref().unwrap() }
+        (self.0 as usize + pid * L) as *mut u8
     }
 }
 
@@ -228,7 +251,7 @@ macro_rules! create_aligned {
             pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
                 assert!((pid as usize) < T);
                 TLQ::<C, L> {
-                    tail: ReadOnlyTail::new(&self.tails.0[pid as usize] as *const u32),
+                    tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut u32),
                     head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut u32),
                     buffer: ThreadLocalBuffer::<L>::new(
                             (&mut self.buffer as *mut u8 as usize
@@ -241,12 +264,12 @@ macro_rules! create_aligned {
             pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, S, L> {
                 let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
                 for i in 0..T {
-                    heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const u32);
+                    heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut u32);
                 }
                 ConsumerHandleImpl::<T, C, S, L> {
                         tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [u32; T]),
                         heads,
-                        buffer: ReadOnlyBuffer::<T, S, L>::new(&self.buffer as *const [u8; S])
+                        buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
                 }
             }
         }
