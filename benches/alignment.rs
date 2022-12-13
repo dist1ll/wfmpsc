@@ -37,7 +37,7 @@ mod _t {
         );
         for i in 0..8 {
             let tlq = queue.get_producer_handle(i);
-            let tmp = std::thread::spawn(move || unsafe {
+            let tmp = std::thread::spawn(move || {
                 // fill the queue ffs
                 fill_mpscq_thread(i, tlq);
             });

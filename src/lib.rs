@@ -113,8 +113,9 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
         // performing STORE operations on this memory address.
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
-            let new_val = ((*self.0)[pid] + len) & (((1 << C) - 1) as u32);
             let ptr = (self.0 as usize + pid * 4) as *mut u32;
+            let curr_val = (&*(ptr as *const AtomicU32)).load(Ordering::Relaxed);
+            let new_val = (curr_val + len) & (((1 << C) - 1) as u32);
             let atomic = &*(ptr as *const AtomicU32);
             atomic.store(new_val, Ordering::Release);
         }
