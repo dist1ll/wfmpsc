@@ -50,7 +50,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
         unsafe {
             core::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), write_len);
         }
-        self.tails.increment(pid, write_len as u32);
+        self.tails.increment_atomic_rel(pid, write_len as u32);
         write_len
     }
 
@@ -106,14 +106,17 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
         // TODO: Check that pointer arithmetics don't outperform this
         unsafe { (*self.0)[pid] }
     }
+    /// Increment the tail atomically using release semantics.
     #[inline(always)]
-    pub fn increment(&self, pid: usize, len: u32) {
+    pub fn increment_atomic_rel(&self, pid: usize, len: u32) {
         // NOTE: We don't need CAS or LL/SC because we are the only thread that's
         // performing STORE operations on this memory address.
-        // TODO: Implement the atomic store
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
-            (*self.0)[pid] = ((*self.0)[pid] + len) & (((1 << C) - 1) as u32);
+            let new_val = ((*self.0)[pid] + len) & (((1 << C) - 1) as u32);
+            let ptr = (self.0 as usize + pid * 4) as *mut u32;
+            let atomic = &*(ptr as *const AtomicU32);
+            atomic.store(new_val, Ordering::Release);
         }
     }
 }
@@ -126,8 +129,8 @@ impl<const C: usize> ReadOnlyTail<C> {
     pub fn new(ptr: *mut u32) -> Self {
         Self { 0: ptr }
     }
-    /// Performs an atomic read on the tail with acquire semantics, as the value 
-    /// is expected to be written to from the consumer. 
+    /// Performs an atomic read on the tail with acquire semantics, as the value
+    /// is expected to be written to from the consumer.
     #[inline(always)]
     pub fn read_atomic_acq(&self) -> u32 {
         unsafe {
@@ -145,7 +148,7 @@ impl<const C: usize> ReadOnlyHead<C> {
     pub fn new(ptr: *mut u32) -> Self {
         Self { 0: ptr }
     }
-    /// Performs an atomic read on the head with acquire semantics, as the value 
+    /// Performs an atomic read on the head with acquire semantics, as the value
     /// is expected to be written to from the producer.
     #[inline(always)]
     pub fn read_atomic_acq(&self) -> u32 {

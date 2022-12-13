@@ -15,8 +15,14 @@ mod _t {
     use wfmpsc::{queue, ConsumerHandle, TLQ};
 
     #[bench]
-    fn eval_checked_fill(b: &mut Bencher) {
-        // fill_mpscq();
+    fn eval_single(b: &mut Bencher) {
+        eprintln!("Starting...");
+        fill_mpscq();
+        eprintln!("Done!");
+    }
+
+    #[bench]
+    fn eval_iter(b: &mut Bencher) {
         b.iter(|| {
             black_box(fill_mpscq());
         })
@@ -48,10 +54,6 @@ mod _t {
     fn empty_mpscq_thread(c: impl ConsumerHandle, elem_count: usize) {
         let mut counter: usize = 0;
         let mut destination_buffer = [0u8; 65536]; // uart dummy
-
-        unsafe {
-            std::arch::asm!("nop");
-        }
         loop {
             if counter >= elem_count {
                 return;
