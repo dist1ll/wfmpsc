@@ -299,6 +299,13 @@ impl<'a,
                 buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
         }
     }
+    pub fn zero_heads_and_tails(&mut self) {
+        for i in 0..T {
+            self.tails.0[i] = 0;
+            self.heads[i].0 = 0;
+        }
+    }
+
 }
 /* create_aligned! end */
 
@@ -367,8 +374,10 @@ macro_rules! queue {
                     {1 << $b}>
             }
         };
-        unsafe { queue.as_mut().unwrap() }
-    }};
+            let q_ref = unsafe { queue.as_mut().unwrap() };
+            q_ref.zero_heads_and_tails();
+            q_ref
+      }};
 }
 
 /// Creates a MPSC queue with a custom allocator.
