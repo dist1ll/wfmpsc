@@ -10,7 +10,7 @@ use core::fmt::Debug;
 pub use paste::paste;
 use std::{
     fmt::Display,
-    sync::atomic::{compiler_fence, AtomicU32, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 /// A safe interface to access the MPSC queue, allowing a single
@@ -204,6 +204,29 @@ impl<const C: usize> ThreadLocalHead<C> {
     }
 }
 
+impl<const C: usize, const L: usize> Display for TLQ<C, L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "Head(val): {}\nHead(addr): 0x{:x}\nBuffer: {}",
+            self.head, self.head.0 as usize, self.buffer
+        )
+    }
+}
+
+impl<const L: usize> Display for ThreadLocalBuffer<L> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        unsafe {
+            let arr = *self.0;
+            write!(f, "[ ")?;
+            for i in 0..(L - 1) {
+                write!(f, "{:?} ", arr[i])?;
+            }
+            write!(f, "]")?;
+        }
+        Ok(())
+    }
+}
 impl<const C: usize> Display for ThreadLocalHead<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         unsafe { write!(f, "{:?}", *self.0) }
@@ -223,72 +246,79 @@ pub type DeallocFn = fn(*mut u8, usize, usize);
 macro_rules! create_aligned {
     ($($ALIGN:literal),+$(,)*) => ($(
     paste::paste!{
-        /// Array of cache-aligned queue tails
-        #[repr(C, align($ALIGN))]
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        pub struct [<__Tails $ALIGN>]<const T: usize>(pub [u32; T]);
-        /// Single queue head
-        #[repr(C, align($ALIGN))]
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-        pub struct [<__Head $ALIGN>](pub u32);
-        /// MPSCQ table that stores tail and head as offsets into TLQs. S is the max
-        /// number of elements in all TLQs combined. So S = T * 2^C
-        pub struct [<__MPSCQ $ALIGN>]<
-            const T: usize, // number of producers
-            const C: usize, // bitwidth of queue size
-            const S: usize, // size of entire global buffer (T * 2^C)
-            const L: usize> // size of thread-local buffer (2^C)
-        {
-            buffer: [u8; S],
-            tails: [<__Tails $ALIGN>]<T>,
-            heads: [[<__Head $ALIGN>]; T],
-            dealloc: DeallocFn,
-        }
+/// Array of cache-aligned queue tails
+#[repr(C, align($ALIGN))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct [<__Tails $ALIGN>]<const T: usize>(pub [u32; T]);
+/// Single queue head
+#[repr(C, align($ALIGN))]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct [<__Head $ALIGN>](pub u32);
+/// MPSCQ table that stores tail and head as offsets into TLQs. S is the max
+/// number of elements in all TLQs combined. So S = T * 2^C
+pub struct [<__MPSCQ $ALIGN>]<
+    const T: usize, // number of producers
+    const C: usize, // bitwidth of queue size
+    const S: usize, // size of entire global buffer (T * 2^C)
+    const L: usize> // size of thread-local buffer (2^C)
+{
+    buffer: [u8; S],
+    tails: [<__Tails $ALIGN>]<T>,
+    heads: [[<__Head $ALIGN>]; T],
+    dealloc: DeallocFn,
+}
 
-        impl<'a,
-            const T: usize, const C: usize, const S: usize, const L: usize>
-            [<__MPSCQ $ALIGN>]<T, C, S, L> {
-            /// Returns a TLQ handle. The only threads that are allowed to modify
-            /// the data behind this TLQ are the consumer thread and the producer
-            /// thread with the given pid. Any other access is unsafe and may
-            /// lead to critical failure!
-            pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
-                assert!((pid as usize) < T);
-                TLQ::<C, L> {
-                    tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut u32),
-                    head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut u32),
-                    buffer: ThreadLocalBuffer::<L>::new(
-                            (&mut self.buffer as *mut u8 as usize
-                                + {pid as usize * {1 << C}}) as *mut [u8; L]
-                    ),
-                }
-            }
-            /// Returns a consumer handle. This allows a single thread to pop data
-            /// from the other producers in a safe way.
-            pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, S, L> {
-                let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
-                for i in 0..T {
-                    heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut u32);
-                }
-                ConsumerHandleImpl::<T, C, S, L> {
-                        tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [u32; T]),
-                        heads,
-                        buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
-                }
-            }
+impl<'a,
+    const T: usize, const C: usize, const S: usize, const L: usize>
+    [<__MPSCQ $ALIGN>]<T, C, S, L> {
+    /// Returns a TLQ handle. The only threads that are allowed to modify
+    /// the data behind this TLQ are the consumer thread and the producer
+    /// thread with the given pid. Any other access is unsafe and may
+    /// lead to critical failure!
+    pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
+        assert!((pid as usize) < T);
+        TLQ::<C, L> {
+            tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut u32),
+            head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut u32),
+            buffer: ThreadLocalBuffer::<L>::new(
+                    (&mut self.buffer as *mut u8 as usize
+                        + {pid as usize * {1 << C}}) as *mut [u8; L]
+            ),
         }
-        // Run custom deallocator!
-        impl<const T: usize, const C: usize, const S: usize, const L: usize>
-            Drop for [<__MPSCQ $ALIGN>]<T, C, S, L>
-        {
-            fn drop(&mut self) {
-                let f = self.dealloc;
-                f(&mut self.buffer as *mut u8, S, L);
-            }
+    }
+    /// Returns a consumer handle. This allows a single thread to pop data
+    /// from the other producers in a safe way.
+    pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, S, L> {
+        let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
+        for i in 0..T {
+            heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut u32);
         }
+        ConsumerHandleImpl::<T, C, S, L> {
+                tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [u32; T]),
+                heads,
+                buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
+        }
+    }
+}
+/* create_aligned! end */
+
+
+// Run custom deallocator!
+impl<const T: usize, const C: usize, const S: usize, const L: usize>
+    Drop for [<__MPSCQ $ALIGN>]<T, C, S, L>
+{
+    fn drop(&mut self) {
+        let f = self.dealloc;
+        f(&mut self.buffer as *mut u8, S, L);
+    }
+}
     }
     )*)
 }
+
+/*
+
+*/
 
 impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
     for __MPSCQ128<T, C, S, L>

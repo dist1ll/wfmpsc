@@ -31,7 +31,7 @@ mod _t {
     fn fill_mpscq() {
         let mut handlers = vec![];
         let mut queue = queue!(
-            bitsize: 16,
+            bitsize: 4,
             producers: 8,
             l1_cache: 128
         );
@@ -43,7 +43,7 @@ mod _t {
             });
             handlers.push(tmp);
         }
-        empty_mpscq_thread(queue.get_consumer_handle(), 8 * ((1 << 16) - 1));
+        // empty_mpscq_thread(queue.get_consumer_handle(), 8 * ((1 << 16) - 1));
         for h in handlers {
             h.join().expect("Joining thread");
         }
@@ -53,7 +53,7 @@ mod _t {
     /// `elem_count` elements have been popped in total.
     fn empty_mpscq_thread(c: impl ConsumerHandle, elem_count: usize) {
         let mut counter: usize = 0;
-        let mut destination_buffer = [0u8; 65536]; // uart dummy
+        let mut destination_buffer = [0u8; 1 << 8]; // uart dummy
         loop {
             if counter >= elem_count {
                 return;
@@ -66,8 +66,17 @@ mod _t {
     }
 
     fn fill_mpscq_thread<const C: usize, const L: usize>(qid: u8, tlq: TLQ<C, L>) {
-        for i in 0u64..((1u64 << C) - 1) {
-            black_box(&tlq).push_single(i as u8);
+        if qid != 2 { return; }
+        eprintln!("tlq: head start: {}", tlq.head);
+        for i in 0u64..(2 * (1u64 << C) - 1) {
+            let mut val = i as u8;
+            if qid == 0 {
+                val = 0;
+            }
+            eprintln!("\n\nbefore: {}", tlq.buffer);
+            black_box(&tlq).push_single(val);
+            eprintln!("after:  {}\n\n", tlq.buffer);
         }
+        eprintln!("TLQ: #{}\n{}\n", qid, tlq);
     }
 }
