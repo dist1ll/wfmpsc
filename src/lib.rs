@@ -78,7 +78,7 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
     pub fn push_single(&self, byte: u8) {
         unsafe {
             let h = *self.head.0 as usize;
-            let offset = (h + 1) & ((1usize << C) - 1);
+            let offset = h & ((1usize << C) - 1);
             (*self.buffer.0)[offset] = byte;
         }
         self.head.increment_by(1);
