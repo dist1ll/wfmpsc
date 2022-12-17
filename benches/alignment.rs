@@ -67,11 +67,7 @@ mod _t {
 
     fn fill_mpscq_thread<const C: usize, const L: usize>(qid: u8, tlq: TLQ<C, L>) {
         for i in 0u64..(2 * (1u64 << C) - 1) {
-            let mut val = i as u8;
-            if qid == 0 {
-                val = 0;
-            }
-            black_box(&tlq).push_single(val);
+            black_box(&tlq).push_single(i as u8);
         }
         eprintln!("TLQ: #{}\n{}\n", qid, tlq);
     }

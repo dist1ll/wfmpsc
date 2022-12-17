@@ -76,10 +76,16 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
     /// as long as the buffer is a contiguous block of 2^C bytes.
     #[inline]
     pub fn push_single(&self, byte: u8) {
+        // relaxed ordering is fine, because a stale read from tail
+        // does not cause a data race.
+        let tail = self.tail.read_atomic(Ordering::Relaxed);
+        let head = unsafe { *self.head.0 } as u32;
+        if (head + 1) & fmask_32::<C>() == tail {
+            return;
+        }
+        let offset = head & fmask_32::<C>();
         unsafe {
-            let h = *self.head.0 as usize;
-            let offset = h & ((1usize << C) - 1);
-            (*self.buffer.0)[offset] = byte;
+            (*self.buffer.0)[offset as usize] = byte;
         }
         self.head.increment_by(1);
     }
@@ -133,7 +139,7 @@ impl<const C: usize> ReadOnlyTail<C> {
     /// Performs an atomic read on the tail with acquire semantics, as the value
     /// is expected to be written to from the consumer.
     #[inline(always)]
-    pub fn read_atomic_acq(&self) -> u32 {
+    pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
             let atomic = &*(self.0 as *const AtomicU32);
             atomic.load(Ordering::Acquire)
@@ -374,10 +380,10 @@ macro_rules! queue {
                     {1 << $b}>
             }
         };
-            let q_ref = unsafe { queue.as_mut().unwrap() };
-            q_ref.zero_heads_and_tails();
-            q_ref
-      }};
+        let q_ref = unsafe { queue.as_mut().unwrap() };
+        q_ref.zero_heads_and_tails();
+        q_ref
+    }};
 }
 
 /// Creates a MPSC queue with a custom allocator.
@@ -417,6 +423,11 @@ macro_rules! queue_alloc {
     }};
 }
 
+/// Returns 0xfff..., where `B` is the number of `f`s.
+#[inline(always)]
+const fn fmask_32<const B: usize>() -> u32 {
+    (1 << B) - 1
+}
 use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
