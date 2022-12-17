@@ -87,7 +87,7 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
         unsafe {
             (*self.buffer.0)[offset as usize] = byte;
         }
-        self.head.increment_by(1);
+        self.head.incr_atomic_rel(1);
     }
 }
 unsafe impl<const C: usize, const S: usize> Send for TLQ<C, S> {}
@@ -200,12 +200,12 @@ impl<const C: usize> ThreadLocalHead<C> {
     /// Increments the head pointer, thereby committing the written
     /// bytes to the consumer
     #[inline]
-    pub fn increment_by(&self, amount: u32) {
+    pub fn incr_atomic_rel(&self, amount: u32) {
         unsafe {
-            // We mask by the capacity of the Queue. We always
-            // need to make sure that the queue this offset
-            // is referencing always has 2^C capacity
-            *self.0 = (*self.0 + amount) & ((1 << C) - 1) as u32;
+            let atomic = &*(self.0 as *const AtomicU32);
+            let head = atomic.load(Ordering::Relaxed);
+            let val = (head + amount) & fmask_32::<C>();
+            atomic.store(val, Ordering::Release);
         }
     }
 }
