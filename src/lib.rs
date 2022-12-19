@@ -13,6 +13,9 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
+/* Aliases for Sizes */
+type AtomicTail = AtomicU32;
+
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
     /// Remove a single byte from a producer with the given producer id.
@@ -42,7 +45,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
     }
 
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
-        let tail = self.tails.get(pid);
+        let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
         let data_len = (self.heads[pid].read_atomic_acq() - tail) as usize;
         let write_len = core::cmp::min(data_len, dst.len());
         let tlq_base_ptr = self.buffer.get_tlq_slice(pid);
@@ -151,15 +154,22 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-pub struct RWTails<const T: usize, const C: usize>(*mut [u32; T]);
+pub struct RWTails<const T: usize, const C: usize>(*mut [AtomicTail; T]);
 impl<const T: usize, const C: usize> RWTails<T, C> {
-    pub fn new(ptr: *mut [u32; T]) -> Self {
-        Self { 0: ptr }
+    pub fn new(ptr: *mut [AtomicTail; T]) -> Self {
+        Self {
+            0: ptr as *mut [AtomicTail; T],
+        }
     }
     #[inline(always)]
-    pub fn get(&self, pid: usize) -> u32 {
+    pub fn read_atomic(&self, pid: usize, ord: Ordering) -> u32 {
         // TODO: Check that pointer arithmetics don't outperform this
-        unsafe { (*self.0)[pid] }
+        unsafe {
+            let base_addr = self.0 as *mut AtomicTail as usize;
+            let pid_pointer = base_addr + pid * core::mem::size_of::<AtomicTail>();
+            let atomic = &*(pid_pointer as *const AtomicU32);
+            atomic.load(ord)
+        }
     }
     /// Increment the tail atomically using release semantics.
     #[inline(always)]
@@ -180,9 +190,9 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
 /// A tail that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the consumer.
 #[derive(Debug)]
-pub struct ReadOnlyTail<const C: usize>(*mut u32);
+pub struct ReadOnlyTail<const C: usize>(*mut AtomicTail);
 impl<const C: usize> ReadOnlyTail<C> {
-    pub fn new(ptr: *mut u32) -> Self {
+    pub fn new(ptr: *mut AtomicTail) -> Self {
         Self { 0: ptr }
     }
     /// Performs an atomic read on the tail with given memory ordering.
@@ -310,8 +320,8 @@ macro_rules! create_aligned {
     paste::paste!{
 /// Array of cache-aligned queue tails
 #[repr(C, align($ALIGN))]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct [<__Tails $ALIGN>]<const T: usize>(pub [u32; T]);
+#[derive(Debug)]
+pub struct [<__Tails $ALIGN>]<const T: usize>(pub [AtomicTail; T]);
 /// Single queue head
 #[repr(C, align($ALIGN))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -340,7 +350,7 @@ impl<'a,
     pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
         assert!((pid as usize) < T);
         TLQ::<C, L> {
-            tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut u32),
+            tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut AtomicTail),
             head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut u32),
             buffer: ThreadLocalBuffer::<L>::new(
                     (&mut self.buffer as *mut u8 as usize
@@ -356,14 +366,14 @@ impl<'a,
             heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut u32);
         }
         ConsumerHandleImpl::<T, C, S, L> {
-                tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [u32; T]),
+                tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [AtomicTail; T]),
                 heads,
                 buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
         }
     }
     pub fn zero_heads_and_tails(&mut self) {
         for i in 0..T {
-            self.tails.0[i] = 0;
+            self.tails.0[i] = AtomicTail::new(0);
             self.heads[i].0 = 0;
         }
     }
