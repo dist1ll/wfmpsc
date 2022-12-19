@@ -79,7 +79,7 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
         let tail = self.tail.read_atomic(Ordering::Relaxed);
-        let head = unsafe { *self.head.0 } as u32;
+        let head = self.head.read_atomic(Ordering::Relaxed);
         if (head + 1) & fmask_32::<C>() == tail {
             return;
         }
@@ -97,7 +97,7 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
         let tail = self.tail.read_atomic(Ordering::Relaxed);
-        let head = unsafe { *self.head.0 } as u32;
+        let head = self.head.read_atomic(Ordering::Relaxed);
         let capacity = TLQ::<C, L>::capacity(head, tail);
         let len = byte.len() as u32;
         if ((head + 1) & fmask_32::<C>() == tail)
@@ -186,8 +186,7 @@ impl<const C: usize> ReadOnlyTail<C> {
     pub fn new(ptr: *mut u32) -> Self {
         Self { 0: ptr }
     }
-    /// Performs an atomic read on the tail with acquire semantics, as the value
-    /// is expected to be written to from the consumer.
+    /// Performs an atomic read on the tail with given memory ordering.
     #[inline(always)]
     pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
@@ -256,6 +255,14 @@ impl<const C: usize> ThreadLocalHead<C> {
             let head = atomic.load(Ordering::Relaxed);
             let val = (head + amount) & fmask_32::<C>();
             atomic.store(val, Ordering::Release);
+        }
+    }
+    /// Performs an atomic read on the head with given ordering.
+    #[inline(always)]
+    pub fn read_atomic(&self, ord: Ordering) -> u32 {
+        unsafe {
+            let atomic = &*(self.0 as *const AtomicU32);
+            atomic.load(ord)
         }
     }
 }
