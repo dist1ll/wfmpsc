@@ -99,15 +99,14 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
         let tail = self.tail.read_atomic(Ordering::Relaxed);
         let head = self.head.read_atomic(Ordering::Relaxed);
         let capacity = TLQ::<C, L>::capacity(head, tail);
-        let len = byte.len() as u32;
-        if ((head + 1) & fmask_32::<C>() == tail)
-            || byte.len() == 0
-            // Limit arg bytes to queue size - 1 (because we can't distinguish)
-            // between full and empty queues if its filled entirely.
-            || capacity < (len + 1)
-        {
+
+        // Limit arg bytes to queue size - 1 (because we can't distinguish)
+        // between full and empty queues if its filled entirely.
+        let len = core::cmp::min(capacity, byte.len() as u32 + 1) - 1;
+        if ((head + 1) & fmask_32::<C>() == tail) || byte.len() == 0 {
             return;
         }
+
         let target_wrap = (head + len as u32) & fmask_32::<C>();
         let src = byte.as_ptr() as usize;
         let dst = self.buffer.0 as usize + head as usize;
