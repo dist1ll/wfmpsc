@@ -89,6 +89,56 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
         }
         self.head.incr_atomic_rel(1);
     }
+
+    /// Pushes a single byte to the buffer. This operation is safe
+    /// as long as the buffer is a contiguous block of 2^C bytes.
+    #[inline]
+    pub fn push(&self, byte: &[u8]) {
+        // relaxed ordering is fine, because a stale read from tail
+        // does not cause a data race.
+        let tail = self.tail.read_atomic(Ordering::Relaxed);
+        let head = unsafe { *self.head.0 } as u32;
+        let capacity = TLQ::<C, L>::capacity(head, tail);
+        let len = byte.len() as u32;
+        if ((head + 1) & fmask_32::<C>() == tail)
+            || byte.len() == 0
+            // Limit arg bytes to queue size - 1 (because we can't distinguish)
+            // between full and empty queues if its filled entirely.
+            || capacity < (len + 1)
+        {
+            return;
+        }
+        let target_wrap = (head + len as u32) & fmask_32::<C>();
+        let src = byte.as_ptr() as usize;
+        let dst = self.buffer.0 as usize + head as usize;
+        if target_wrap >= head {
+            // only make one copy
+            unsafe {
+                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, len as usize);
+            }
+        }
+        // TODO: place this path into a seperate function, as its less likely.
+        else {
+            // we have two make two copies
+            unsafe {
+                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, C);
+                core::ptr::copy_nonoverlapping(
+                    (src + C - head as usize) as *const u8,
+                    self.buffer.0 as *mut u8,
+                    C - head as usize,
+                );
+            }
+        }
+        self.head.incr_atomic_rel(len);
+    }
+
+    #[inline(always)]
+    fn capacity(head: u32, tail: u32) -> u32 {
+        match head >= tail {
+            true => (1 << C) - (head - tail),
+            false => tail - head,
+        }
+    }
 }
 unsafe impl<const C: usize, const S: usize> Send for TLQ<C, S> {}
 

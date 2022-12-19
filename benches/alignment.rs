@@ -14,6 +14,18 @@ mod _t {
     use test::{black_box, Bencher};
     use wfmpsc::{queue, ConsumerHandle, TLQ};
 
+    /// Simple SPSC case.
+    #[bench]
+    fn spsc(b: &mut Bencher) {
+        let queue = queue!(
+            bitsize: 4,
+            producers: 1,
+            l1_cache: 128
+        );
+        let p = queue.get_producer_handle(0);
+        p.push(&[0, 1, 2, 3]);
+    }
+
     #[bench]
     fn eval_single(b: &mut Bencher) {
         eprintln!("Starting...");
@@ -66,8 +78,9 @@ mod _t {
     }
 
     fn fill_mpscq_thread<const C: usize, const L: usize>(qid: u8, tlq: TLQ<C, L>) {
-        for i in 0u64..(2 * (1u64 << C) - 1) {
-            black_box(&tlq).push_single(i as u8);
+        let b = [0u8, 1, 2, 3];
+        for _ in 0u64..(2 * (1u64 << C) - 1) {
+            black_box(&tlq).push(&b);
         }
         eprintln!("TLQ: #{}\n{}\n", qid, tlq);
     }

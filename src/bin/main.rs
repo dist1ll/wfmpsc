@@ -16,5 +16,4 @@ fn call() {
         producers: 9,
         l1_cache: 128
     );
-
 }
