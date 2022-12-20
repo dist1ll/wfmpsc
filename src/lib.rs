@@ -13,8 +13,8 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
-/* Aliases for Sizes */
-type AtomicTail = AtomicU32;
+/* Aliases for queue's atomic integer type */
+type AtomicUnit = AtomicU32;
 
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
@@ -154,20 +154,20 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-pub struct RWTails<const T: usize, const C: usize>(*mut [AtomicTail; T]);
+pub struct RWTails<const T: usize, const C: usize>(*mut [AtomicUnit; T]);
 impl<const T: usize, const C: usize> RWTails<T, C> {
-    pub fn new(ptr: *mut [AtomicTail; T]) -> Self {
+    pub fn new(ptr: *mut [AtomicUnit; T]) -> Self {
         Self {
-            0: ptr as *mut [AtomicTail; T],
+            0: ptr as *mut [AtomicUnit; T],
         }
     }
     #[inline(always)]
     pub fn read_atomic(&self, pid: usize, ord: Ordering) -> u32 {
         // TODO: Check that pointer arithmetics don't outperform this
         unsafe {
-            let base_addr = self.0 as *mut AtomicTail as usize;
-            let pid_pointer = base_addr + pid * core::mem::size_of::<AtomicTail>();
-            let atomic = &*(pid_pointer as *const AtomicTail);
+            let base_addr = self.0 as *mut AtomicUnit as usize;
+            let pid_pointer = base_addr + pid * core::mem::size_of::<AtomicUnit>();
+            let atomic = &*(pid_pointer as *const AtomicUnit);
             atomic.load(ord)
         }
     }
@@ -178,10 +178,9 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
         // performing STORE operations on this memory address.
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
-            let ptr = (self.0 as usize + pid * 4) as *mut u32;
-            let curr_val = (&*(ptr as *const AtomicTail)).load(Ordering::Relaxed);
+            let atomic = &*((self.0 as usize + pid * 4) as *mut AtomicUnit);
+            let curr_val = atomic.load(Ordering::Relaxed);
             let new_val = (curr_val + len) & fmask_32::<C>();
-            let atomic = &*(ptr as *const AtomicTail);
             atomic.store(new_val, Ordering::Release);
         }
     }
@@ -190,16 +189,16 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
 /// A tail that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the consumer.
 #[derive(Debug)]
-pub struct ReadOnlyTail<const C: usize>(*mut AtomicTail);
+pub struct ReadOnlyTail<const C: usize>(*mut AtomicUnit);
 impl<const C: usize> ReadOnlyTail<C> {
-    pub fn new(ptr: *mut AtomicTail) -> Self {
+    pub fn new(ptr: *mut AtomicUnit) -> Self {
         Self { 0: ptr }
     }
     /// Performs an atomic read on the tail with given memory ordering.
     #[inline(always)]
     pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicTail);
+            let atomic = &*(self.0 as *const AtomicUnit);
             atomic.load(ord)
         }
     }
@@ -208,9 +207,9 @@ impl<const C: usize> ReadOnlyTail<C> {
 /// A head that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the producer.
 #[derive(Debug)]
-pub struct ReadOnlyHead<const C: usize>(*mut u32);
+pub struct ReadOnlyHead<const C: usize>(*mut AtomicUnit);
 impl<const C: usize> ReadOnlyHead<C> {
-    pub fn new(ptr: *mut u32) -> Self {
+    pub fn new(ptr: *mut AtomicUnit) -> Self {
         Self { 0: ptr }
     }
     /// Performs an atomic read on the head with acquire semantics, as the value
@@ -218,7 +217,7 @@ impl<const C: usize> ReadOnlyHead<C> {
     #[inline(always)]
     pub fn read_atomic_acq(&self) -> u32 {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicU32);
+            let atomic = &*(self.0 as *const AtomicUnit);
             atomic.load(Ordering::Acquire)
         }
     }
@@ -250,9 +249,9 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
 /// the head references exactly 2^C element, which means the queue's
 /// ring buffer needs to have a matching capacity.
 #[derive(Debug)]
-pub struct ThreadLocalHead<const C: usize>(*mut u32);
+pub struct ThreadLocalHead<const C: usize>(*mut AtomicUnit);
 impl<const C: usize> ThreadLocalHead<C> {
-    pub fn new(ptr: *mut u32) -> Self {
+    pub fn new(ptr: *mut AtomicUnit) -> Self {
         Self { 0: ptr }
     }
     /// Increments the head pointer, thereby committing the written
@@ -260,7 +259,7 @@ impl<const C: usize> ThreadLocalHead<C> {
     #[inline]
     pub fn incr_atomic_rel(&self, amount: u32) {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicU32);
+            let atomic = &*(self.0 as *const AtomicUnit);
             let head = atomic.load(Ordering::Relaxed);
             let val = (head + amount) & fmask_32::<C>();
             atomic.store(val, Ordering::Release);
@@ -270,7 +269,7 @@ impl<const C: usize> ThreadLocalHead<C> {
     #[inline(always)]
     pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicU32);
+            let atomic = &*(self.0 as *const AtomicUnit);
             atomic.load(ord)
         }
     }
@@ -321,11 +320,11 @@ macro_rules! create_aligned {
 /// Array of cache-aligned queue tails
 #[repr(C, align($ALIGN))]
 #[derive(Debug)]
-pub struct [<__Tails $ALIGN>]<const T: usize>(pub [AtomicTail; T]);
+pub struct [<__Tails $ALIGN>]<const T: usize>(pub [AtomicUnit; T]);
 /// Single queue head
 #[repr(C, align($ALIGN))]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct [<__Head $ALIGN>](pub u32);
+#[derive(Debug)]
+pub struct [<__Head $ALIGN>](pub AtomicUnit);
 /// MPSCQ table that stores tail and head as offsets into TLQs. S is the max
 /// number of elements in all TLQs combined. So S = T * 2^C
 pub struct [<__MPSCQ $ALIGN>]<
@@ -350,8 +349,8 @@ impl<'a,
     pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
         assert!((pid as usize) < T);
         TLQ::<C, L> {
-            tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut AtomicTail),
-            head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut u32),
+            tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut AtomicUnit),
+            head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut AtomicUnit),
             buffer: ThreadLocalBuffer::<L>::new(
                     (&mut self.buffer as *mut u8 as usize
                         + {pid as usize * {1 << C}}) as *mut [u8; L]
@@ -363,18 +362,18 @@ impl<'a,
     pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, S, L> {
         let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
         for i in 0..T {
-            heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut u32);
+            heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut AtomicUnit);
         }
         ConsumerHandleImpl::<T, C, S, L> {
-                tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [AtomicTail; T]),
+                tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [AtomicUnit; T]),
                 heads,
                 buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
         }
     }
     pub fn zero_heads_and_tails(&mut self) {
         for i in 0..T {
-            self.tails.0[i] = AtomicTail::new(0);
-            self.heads[i].0 = 0;
+            self.tails.0[i] = AtomicUnit::new(0);
+            self.heads[i].0 = AtomicUnit::new(0);
         }
     }
 
@@ -405,7 +404,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "heads: ")?;
         for (idx, h) in self.heads.iter().enumerate() {
-            write!(f, "[#{}: {}] ", idx, h.0)?;
+            write!(f, "[#{}: {}] ", idx, h.0.load(Ordering::Relaxed))?;
         }
         Ok(())
     }
