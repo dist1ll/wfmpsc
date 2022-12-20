@@ -167,7 +167,7 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
         unsafe {
             let base_addr = self.0 as *mut AtomicTail as usize;
             let pid_pointer = base_addr + pid * core::mem::size_of::<AtomicTail>();
-            let atomic = &*(pid_pointer as *const AtomicU32);
+            let atomic = &*(pid_pointer as *const AtomicTail);
             atomic.load(ord)
         }
     }
@@ -179,9 +179,9 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
             let ptr = (self.0 as usize + pid * 4) as *mut u32;
-            let curr_val = (&*(ptr as *const AtomicU32)).load(Ordering::Relaxed);
+            let curr_val = (&*(ptr as *const AtomicTail)).load(Ordering::Relaxed);
             let new_val = (curr_val + len) & fmask_32::<C>();
-            let atomic = &*(ptr as *const AtomicU32);
+            let atomic = &*(ptr as *const AtomicTail);
             atomic.store(new_val, Ordering::Release);
         }
     }
@@ -199,7 +199,7 @@ impl<const C: usize> ReadOnlyTail<C> {
     #[inline(always)]
     pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicU32);
+            let atomic = &*(self.0 as *const AtomicTail);
             atomic.load(ord)
         }
     }
