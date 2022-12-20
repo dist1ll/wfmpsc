@@ -46,7 +46,8 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
 
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
-        let data_len = (self.heads[pid].read_atomic_acq() - tail) as usize;
+        let head = self.heads[pid].read_atomic(Ordering::Acquire);
+        let data_len = (head - tail) as usize;
         let write_len = core::cmp::min(data_len, dst.len());
         let tlq_base_ptr = self.buffer.get_tlq_slice(pid);
         let src = ((tlq_base_ptr as usize) + tail as usize) as *mut u8;
@@ -95,7 +96,6 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
 
     /// Pushes a single byte to the buffer. This operation is safe
     /// as long as the buffer is a contiguous block of 2^C bytes.
-    #[inline]
     pub fn push(&self, byte: &[u8]) {
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
@@ -212,13 +212,12 @@ impl<const C: usize> ReadOnlyHead<C> {
     pub fn new(ptr: *mut AtomicUnit) -> Self {
         Self { 0: ptr }
     }
-    /// Performs an atomic read on the head with acquire semantics, as the value
-    /// is expected to be written to from the producer.
+    /// Performs an atomic read on the head with given ordering semantics.
     #[inline(always)]
-    pub fn read_atomic_acq(&self) -> u32 {
+    pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
             let atomic = &*(self.0 as *const AtomicUnit);
-            atomic.load(Ordering::Acquire)
+            atomic.load(ord)
         }
     }
 }
