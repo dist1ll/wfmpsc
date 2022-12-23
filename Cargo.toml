@@ -11,11 +11,15 @@ edition = "2021"
 paste = "1.0.9"
 
 [lib]
+# No benchmarks in library itself
+bench = false
 doctest = false
 
-[[bin]]
-name = "main"
-doctest = false
+# Testing correct indexing of ring buffers, during overlapping concurrent
+# pop and push operations
+[[test]]
+name = "overflow"
+path = "tests/overflow.rs"
 
 [[bench]]
 name = "alignment"
