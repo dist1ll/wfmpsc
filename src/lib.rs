@@ -18,7 +18,6 @@ type AtomicUnit = AtomicU32;
 
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
-
     /// Returns the number of producers
     fn get_producer_count(&self) -> usize;
 
@@ -94,7 +93,7 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
         // does not cause a data race.
         let tail = self.tail.read_atomic(Ordering::Relaxed);
         let head = self.head.read_atomic(Ordering::Relaxed);
-        let capacity = TLQ::<C, L>::capacity(head, tail);
+        let capacity = queue_leftover_capacity::<C>(head, tail);
 
         // Limit arg bytes to queue size - 1 (because we can't distinguish)
         // between full and empty queues if its filled entirely.
@@ -126,15 +125,26 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
         }
         self.head.incr_atomic_rel(len);
     }
+}
 
-    #[inline(always)]
-    fn capacity(head: u32, tail: u32) -> u32 {
-        match head >= tail {
-            true => (1 << C) - (head - tail),
-            false => tail - head,
-        }
+
+/// Computes the remaining capacity of a ring buffer for a given head index, tail index 
+/// and bit width of the queue (i.e. the total capacity).
+#[inline(always)]
+pub fn queue_leftover_capacity<const C: usize>(head: u32, tail: u32) -> u32 {
+    match head >= tail {
+        true => (1 << C) - (head - tail),
+        false => tail - head,
     }
 }
+
+/// Computes the element count of a ring buffer for a given head index, tail index and
+/// bit width of the queue (i.e. the total capacity).
+#[inline(always)]
+pub fn queue_element_count<const C: usize>(head: u32, tail: u32) -> u32 {
+    (1 << C) - queue_leftover_capacity::<C>(head, tail)
+}
+
 unsafe impl<const C: usize, const S: usize> Send for TLQ<C, S> {}
 
 #[derive(Debug)] // TODO: Add custom debug implementation!
@@ -238,7 +248,7 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
 }
 
 /// Read & Write access to a TLQ head. May only be modified by a
-/// single producer. 
+/// single producer.
 /// A head that may only be modified by exactly one thread! Also:
 /// the head references exactly 2^C element, which means the queue's
 /// ring buffer needs to have a matching capacity.
