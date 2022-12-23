@@ -38,7 +38,9 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
 {
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
-        let head = self.heads[pid].read_atomic(Ordering::Acquire);
+        // We can use relaxed memory ordering, because a stale head doesn't cause
+        // a data race. 
+        let head = self.heads[pid].read_atomic(Ordering::Relaxed);
         let queue_element_count = queue_element_count::<C>(head, tail) as usize;
         let write_len = core::cmp::min(queue_element_count, dst.len());
         let tlq_base_ptr = self.buffer.get_tlq_slice(pid);
