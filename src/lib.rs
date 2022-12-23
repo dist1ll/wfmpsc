@@ -70,26 +70,9 @@ pub struct TLQ<const C: usize, const L: usize> {
 }
 
 impl<const C: usize, const L: usize> TLQ<C, L> {
-    /// Pushes a single byte to the buffer. This operation is safe
-    /// as long as the buffer is a contiguous block of 2^C bytes.
-    #[inline]
-    pub fn push_single(&self, byte: u8) {
-        // relaxed ordering is fine, because a stale read from tail
-        // does not cause a data race.
-        let tail = self.tail.read_atomic(Ordering::Relaxed);
-        let head = self.head.read_atomic(Ordering::Relaxed);
-        if (head + 1) & fmask_32::<C>() == tail {
-            return;
-        }
-        let offset = head & fmask_32::<C>();
-        unsafe {
-            (*self.buffer.0)[offset as usize] = byte;
-        }
-        self.head.incr_atomic_rel(1);
-    }
 
-    /// Pushes a single byte to the buffer. This operation is safe
-    /// as long as the buffer is a contiguous block of 2^C bytes.
+    /// Pushes a byte slice to the buffer. This operation is sound as long
+    /// as the TLQ's backing array is a contiguous block of 2^C bytes.
     pub fn push(&self, byte: &[u8]) {
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
@@ -125,7 +108,8 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
                 );
             }
         }
-        self.head.incr_atomic_rel(len);
+        // We don't want to increment the head before the memcpy completes!
+        self.head.store_atomic((head + len) & fmask_32::<C>(), Ordering::Release);
     }
 }
 
@@ -263,11 +247,9 @@ impl<const C: usize> RWHead<C> {
     /// Increments the head pointer, thereby committing the written
     /// bytes to the consumer
     #[inline]
-    pub fn incr_atomic_rel(&self, amount: u32) {
+    pub fn store_atomic(&self, val: u32, ord: Ordering) {
         unsafe {
             let atomic = &*(self.0 as *const AtomicUnit);
-            let head = atomic.load(Ordering::Relaxed);
-            let val = (head + amount) & fmask_32::<C>();
             atomic.store(val, Ordering::Release);
         }
     }
