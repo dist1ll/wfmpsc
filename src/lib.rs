@@ -39,8 +39,8 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
         let head = self.heads[pid].read_atomic(Ordering::Acquire);
-        let data_len = (head - tail) as usize;
-        let write_len = core::cmp::min(data_len, dst.len());
+        let queue_element_count = queue_element_count::<C>(head, tail) as usize;
+        let write_len = core::cmp::min(queue_element_count, dst.len());
         let tlq_base_ptr = self.buffer.get_tlq_slice(pid);
         let src = ((tlq_base_ptr as usize) + tail as usize) as *mut u8;
         unsafe {
