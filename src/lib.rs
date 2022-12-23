@@ -18,8 +18,6 @@ type AtomicUnit = AtomicU32;
 
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
-    /// Remove a single byte from a producer with the given producer id.
-    fn pop_single(&self, pid: usize);
 
     /// Returns the number of producers
     fn get_producer_count(&self) -> usize;
@@ -39,11 +37,6 @@ pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, co
 impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHandle
     for ConsumerHandleImpl<T, C, S, L>
 {
-    #[inline]
-    fn pop_single(&self, pid: usize) {
-        eprintln!("popping element from queue: {}", pid);
-    }
-
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
         let head = self.heads[pid].read_atomic(Ordering::Acquire);
@@ -54,7 +47,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
         unsafe {
             core::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), write_len);
         }
-        self.tails.increment_atomic_rel(pid, write_len as u32);
+        self.tails.incr_atomic_rel(pid, write_len as u32);
         write_len
     }
 
@@ -70,7 +63,7 @@ unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
 
 #[derive(Debug)]
 pub struct TLQ<const C: usize, const L: usize> {
-    pub head: ThreadLocalHead<C>,
+    pub head: RWHead<C>,
     pub tail: ReadOnlyTail<C>,
     pub buffer: ThreadLocalBuffer<L>,
 }
@@ -173,7 +166,7 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
     }
     /// Increment the tail atomically using release semantics.
     #[inline(always)]
-    pub fn increment_atomic_rel(&self, pid: usize, len: u32) {
+    pub fn incr_atomic_rel(&self, pid: usize, len: u32) {
         // NOTE: We don't need CAS or LL/SC because we are the only thread that's
         // performing STORE operations on this memory address.
         unsafe {
@@ -244,12 +237,14 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     }
 }
 
+/// Read & Write access to a TLQ head. May only be modified by a
+/// single producer. 
 /// A head that may only be modified by exactly one thread! Also:
 /// the head references exactly 2^C element, which means the queue's
 /// ring buffer needs to have a matching capacity.
 #[derive(Debug)]
-pub struct ThreadLocalHead<const C: usize>(*mut AtomicUnit);
-impl<const C: usize> ThreadLocalHead<C> {
+pub struct RWHead<const C: usize>(*mut AtomicUnit);
+impl<const C: usize> RWHead<C> {
     pub fn new(ptr: *mut AtomicUnit) -> Self {
         Self { 0: ptr }
     }
@@ -297,7 +292,7 @@ impl<const L: usize> Display for ThreadLocalBuffer<L> {
         Ok(())
     }
 }
-impl<const C: usize> Display for ThreadLocalHead<C> {
+impl<const C: usize> Display for RWHead<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         unsafe { write!(f, "{:?}", *self.0) }
     }
@@ -349,7 +344,7 @@ impl<'a,
         assert!((pid as usize) < T);
         TLQ::<C, L> {
             tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut AtomicUnit),
-            head: ThreadLocalHead::new(&mut self.heads[pid as usize].0 as *mut AtomicUnit),
+            head: RWHead::new(&mut self.heads[pid as usize].0 as *mut AtomicUnit),
             buffer: ThreadLocalBuffer::<L>::new(
                     (&mut self.buffer as *mut u8 as usize
                         + {pid as usize * {1 << C}}) as *mut [u8; L]
