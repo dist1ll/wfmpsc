@@ -6,17 +6,26 @@
 
 use wfmpsc::ConsumerHandle;
 
-
 /**!
 This test checks if indexing is correctly implemented for overlapping concurrent
 push and pop operations.
 */
 
+/// Check if partial writes are executed correctly on the buffer.
 #[test]
-pub fn truncated_push() {
+pub fn partial_write() {
     let (cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 4, l1_cache: 64);
-    prod[0].push("hello_world!123..hi what up".as_bytes());
-    let mut dst = [0u8; 16];
+    // push more than 15 bytes into the queue
+    prod[0].push("Hello World, how are you doing".as_bytes());
+    //                           ^
+    //                     the 'w' is the 16th letter
+
+    let mut dst = [0u8; 15];
     cons.pop_elements_into(0, &mut dst);
-    println!("{}", std::str::from_utf8(&dst).unwrap());
+    assert_eq!("Hello World, ho", conv(&dst));
+}
+
+/// utility function that converts byte slice into utf8 and unwraps
+fn conv(b: &[u8]) -> &str {
+    core::str::from_utf8(b).unwrap()
 }

@@ -72,8 +72,20 @@ pub struct TLQ<const C: usize, const L: usize> {
 }
 
 impl<const C: usize, const L: usize> TLQ<C, L> {
-    /// Pushes a byte slice to the buffer. This operation is sound as long
-    /// as the TLQ's backing array is a contiguous block of 2^C bytes.
+    /// Pushes a byte slice to the buffer. Performs a partial write if 
+    /// the queue is full. No error is returned. 
+    ///
+    /// This operation is sound as long as the TLQ's backing array is a 
+    /// contiguous block of 2^C bytes.
+    ///
+    /// TODO: Two functions: push and try_push. Both of them take an argument
+    /// for failure behaviour. Something like: 
+    /// ```
+    /// pub enum FailureBehavior {
+    ///     Noop, 
+    ///     PartialWrite,
+    /// }
+    /// ```
     pub fn push(&self, byte: &[u8]) {
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
