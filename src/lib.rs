@@ -62,7 +62,7 @@ unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
 {
 }
 
-/// A producer handle. Use this to push data into the MPSC queue that can be 
+/// A producer handle. Use this to push data into the MPSC queue that can be
 /// read by the consumer.
 #[derive(Debug)]
 pub struct TLQ<const C: usize, const L: usize> {

@@ -14,20 +14,8 @@ mod _t {
     use test::{black_box, Bencher};
     use wfmpsc::{queue, ConsumerHandle, TLQ};
 
-    /// Simple SPSC case.
     #[bench]
-    fn spsc(b: &mut Bencher) {
-        let queue = queue!(
-            bitsize: 4,
-            producers: 1,
-            l1_cache: 128
-        );
-        let p = queue.get_producer_handle(0);
-        p.push(&[0, 1, 2, 3]);
-    }
-
-    #[bench]
-    fn eval_single(b: &mut Bencher) {
+    fn eval_single(_: &mut Bencher) {
         eprintln!("Starting...");
         fill_mpscq();
         eprintln!("Done!");
@@ -42,16 +30,15 @@ mod _t {
 
     fn fill_mpscq() {
         let mut handlers = vec![];
-        let mut queue = queue!(
+        let (_, prods) = queue!(
             bitsize: 4,
             producers: 8,
             l1_cache: 128
         );
-        for i in 0..8 {
-            let tlq = queue.get_producer_handle(i);
+        for (idx, producer) in prods.into_iter().enumerate() {
             let tmp = std::thread::spawn(move || {
                 // fill the queue ffs
-                fill_mpscq_thread(i, tlq);
+                fill_mpscq_thread(idx, producer);
             });
             handlers.push(tmp);
         }
@@ -77,7 +64,7 @@ mod _t {
         }
     }
 
-    fn fill_mpscq_thread<const C: usize, const L: usize>(qid: u8, tlq: TLQ<C, L>) {
+    fn fill_mpscq_thread<const C: usize, const L: usize>(qid: usize, tlq: TLQ<C, L>) {
         let b = [0u8, 1, 2, 3];
         for _ in 0u64..(2 * (1u64 << C) - 1) {
             black_box(&tlq).push(&b);

@@ -13,7 +13,7 @@ push and pop operations.
 */
 
 #[test]
-pub fn overflow_push() {
+pub fn truncated_push() {
     let (cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 4, l1_cache: 64);
     prod[0].push("hello_world!123..hi what up".as_bytes());
     let mut dst = [0u8; 16];
