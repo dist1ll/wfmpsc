@@ -39,7 +39,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
         // We can use relaxed memory ordering, because a stale head doesn't cause
-        // a data race. 
+        // a data race.
         let head = self.heads[pid].read_atomic(Ordering::Relaxed);
         let queue_element_count = queue_element_count::<C>(head, tail) as usize;
         let write_len = core::cmp::min(queue_element_count, dst.len());
@@ -62,6 +62,8 @@ unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
 {
 }
 
+/// A producer handle. Use this to push data into the MPSC queue that can be 
+/// read by the consumer.
 #[derive(Debug)]
 pub struct TLQ<const C: usize, const L: usize> {
     pub head: RWHead<C>,
@@ -70,7 +72,6 @@ pub struct TLQ<const C: usize, const L: usize> {
 }
 
 impl<const C: usize, const L: usize> TLQ<C, L> {
-
     /// Pushes a byte slice to the buffer. This operation is sound as long
     /// as the TLQ's backing array is a contiguous block of 2^C bytes.
     pub fn push(&self, byte: &[u8]) {
@@ -109,12 +110,12 @@ impl<const C: usize, const L: usize> TLQ<C, L> {
             }
         }
         // We don't want to increment the head before the memcpy completes!
-        self.head.store_atomic((head + len) & fmask_32::<C>(), Ordering::Release);
+        self.head
+            .store_atomic((head + len) & fmask_32::<C>(), Ordering::Release);
     }
 }
 
-
-/// Computes the remaining capacity of a ring buffer for a given head index, tail index 
+/// Computes the remaining capacity of a ring buffer for a given head index, tail index
 /// and bit width of the queue (i.e. the total capacity).
 #[inline(always)]
 pub fn queue_leftover_capacity<const C: usize>(head: u32, tail: u32) -> u32 {
@@ -250,7 +251,7 @@ impl<const C: usize> RWHead<C> {
     pub fn store_atomic(&self, val: u32, ord: Ordering) {
         unsafe {
             let atomic = &*(self.0 as *const AtomicUnit);
-            atomic.store(val, Ordering::Release);
+            atomic.store(val, ord);
         }
     }
     /// Performs an atomic read on the head with given ordering.
@@ -330,10 +331,6 @@ pub struct [<__MPSCQ $ALIGN>]<
 impl<'a,
     const T: usize, const C: usize, const S: usize, const L: usize>
     [<__MPSCQ $ALIGN>]<T, C, S, L> {
-    /// Returns a TLQ handle. The only threads that are allowed to modify
-    /// the data behind this TLQ are the consumer thread and the producer
-    /// thread with the given pid. Any other access is unsafe and may
-    /// lead to critical failure!
     pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
         assert!((pid as usize) < T);
         TLQ::<C, L> {
@@ -357,6 +354,13 @@ impl<'a,
                 heads,
                 buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
         }
+    }
+    pub fn split(&mut self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<C, L>; T]){
+        let mut producers: [TLQ<C, L>; T] = unsafe { std::mem::zeroed() };
+        for (idx, prod) in producers.iter_mut().enumerate() {
+            *prod = self.get_producer_handle(idx as u8);
+        }
+        (self.get_consumer_handle(), producers)
     }
     pub fn zero_heads_and_tails(&mut self) {
         for i in 0..T {
@@ -435,7 +439,7 @@ macro_rules! queue {
         };
         let q_ref = unsafe { queue.as_mut().unwrap() };
         q_ref.zero_heads_and_tails();
-        q_ref
+        q_ref.split()
     }};
 }
 
