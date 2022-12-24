@@ -13,21 +13,38 @@ extern crate test;
 mod _t {
     use test::{black_box, Bencher};
     use wfmpsc::{queue, ConsumerHandle, TLQ};
-
-    #[bench]
-    fn eval_single(_: &mut Bencher) {
-        eprintln!("Starting...");
-        fill_mpscq();
-        eprintln!("Done!");
+    
+    pub struct BenchConfig {
+        /// Number of producer threads. Should be set dependent on system resources.
+        producer_count: usize,
+        /// Type of CPU load with which data is pushed into the MPSC queue 
+        load: LoadFactor,
+        /// Size of chunks inserted into the queue
+        chunk_size: usize,
+        /// Burstiness of traffic. 0 means constant, homogeneous load and 
+        /// 1 means data is added in very short intensive bursts.
+        burstiness: f64,
+    }
+    pub enum LoadFactor {
+        /// Hammering the queue constantly
+        Maximum,
+        /// A few dozen instructions padding
+        Medium, 
+        /// Blocking wait for short time 
+        Low
     }
 
     #[bench]
-    fn eval_iter(b: &mut Bencher) {
-        b.iter(|| {
-            black_box(fill_mpscq());
-        })
-    }
+    fn eval(_: &mut Bencher) {
+        let cpus = num_cpus::get();
 
+        println!("You have {} cpus", cpus)
+
+    }
+    fn run_config(cfg: BenchConfig) {
+        
+    }
+   
     fn fill_mpscq() {
         let mut handlers = vec![];
         let (_, prods) = queue!(
