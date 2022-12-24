@@ -22,4 +22,4 @@ name = "overflow"
 path = "tests/overflow.rs"
 
 [[bench]]
-name = "alignment"
+name = "bench"
