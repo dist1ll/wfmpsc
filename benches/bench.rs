@@ -60,8 +60,7 @@ fn run_wfmpsc(rt_cfg: RuntimeCfg) {
     let mut handlers = vec![];
     let (_, prods) = queue!(
         bitsize: 4,
-        producers: 8,
-        l1_cache: 128
+        producers: 8
     );
     for p in prods.into_iter() {
         let tmp = std::thread::spawn(move || {

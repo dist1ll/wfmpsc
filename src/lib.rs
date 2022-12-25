@@ -72,17 +72,17 @@ pub struct TLQ<const C: usize, const L: usize> {
 }
 
 impl<const C: usize, const L: usize> TLQ<C, L> {
-    /// Pushes a byte slice to the buffer. Performs a partial write if 
-    /// the queue is full. No error is returned. 
+    /// Pushes a byte slice to the buffer. Performs a partial write if
+    /// the queue is full. No error is returned.
     ///
-    /// This operation is sound as long as the TLQ's backing array is a 
+    /// This operation is sound as long as the TLQ's backing array is a
     /// contiguous block of 2^C bytes.
     ///
     /// TODO: Two functions: push and try_push. Both of them take an argument
-    /// for failure behaviour. Something like: 
+    /// for failure behaviour. Something like:
     /// ```
     /// pub enum FailureBehavior {
-    ///     Noop, 
+    ///     Noop,
     ///     PartialWrite,
     /// }
     /// ```
@@ -312,45 +312,44 @@ impl<const C: usize> Display for RWHead<C> {
 ///            (type parameter L)
 pub type DeallocFn = fn(*mut u8, usize, usize);
 
-/// This macro creates one set of types (Tails, Head, MPSCQ) for every cache
-/// alignment. The resulting structs have a naming scheme like __Tails64,
-/// which is a 64-byte aligned struct that stores queue tails.
-macro_rules! create_aligned {
-    ($($ALIGN:literal),+$(,)*) => ($(
-    paste::paste!{
 /// Array of cache-aligned queue tails
-#[repr(C, align($ALIGN))]
+#[cfg_attr(l1_size = "32", repr(C, align(32)))]
+#[cfg_attr(l1_size = "64", repr(C, align(64)))]
+#[cfg_attr(l1_size = "128", repr(C, align(128)))]
 #[derive(Debug)]
-pub struct [<__Tails $ALIGN>]<const T: usize>(pub [AtomicUnit; T]);
+pub struct __Tails<const T: usize>(pub [AtomicUnit; T]);
+
 /// Single queue head
-#[repr(C, align($ALIGN))]
+#[cfg_attr(l1_size = "32", repr(C, align(32)))]
+#[cfg_attr(l1_size = "64", repr(C, align(64)))]
+#[cfg_attr(l1_size = "128", repr(C, align(128)))]
 #[derive(Debug)]
-pub struct [<__Head $ALIGN>](pub AtomicUnit);
+pub struct __Head(pub AtomicUnit);
+
 /// MPSCQ table that stores tail and head as offsets into TLQs. S is the max
 /// number of elements in all TLQs combined. So S = T * 2^C
-pub struct [<__MPSCQ $ALIGN>]<
+pub struct __MPSCQ<
     const T: usize, // number of producers
     const C: usize, // bitwidth of queue size
     const S: usize, // size of entire global buffer (T * 2^C)
-    const L: usize> // size of thread-local buffer (2^C)
+    const L: usize, // size of the thread-local buffer (2 ^ C)
+>
 {
     buffer: [u8; S],
-    tails: [<__Tails $ALIGN>]<T>,
-    heads: [[<__Head $ALIGN>]; T],
+    tails: __Tails<T>,
+    heads: [__Head; T],
     dealloc: DeallocFn,
 }
 
-impl<'a,
-    const T: usize, const C: usize, const S: usize, const L: usize>
-    [<__MPSCQ $ALIGN>]<T, C, S, L> {
+impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ<T, C, S, L> {
     pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
         assert!((pid as usize) < T);
         TLQ::<C, L> {
             tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut AtomicUnit),
             head: RWHead::new(&mut self.heads[pid as usize].0 as *mut AtomicUnit),
             buffer: ThreadLocalBuffer::<L>::new(
-                    (&mut self.buffer as *mut u8 as usize
-                        + {pid as usize * {1 << C}}) as *mut [u8; L]
+                (&mut self.buffer as *mut u8 as usize + { pid as usize * { 1 << C } })
+                    as *mut [u8; L],
             ),
         }
     }
@@ -362,12 +361,12 @@ impl<'a,
             heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut AtomicUnit);
         }
         ConsumerHandleImpl::<T, C, S, L> {
-                tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [AtomicUnit; T]),
-                heads,
-                buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S])
+            tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [AtomicUnit; T]),
+            heads,
+            buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S]),
         }
     }
-    pub fn split(&mut self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<C, L>; T]){
+    pub fn split(&mut self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<C, L>; T]) {
         let mut producers: [TLQ<C, L>; T] = unsafe { std::mem::zeroed() };
         for (idx, prod) in producers.iter_mut().enumerate() {
             *prod = self.get_producer_handle(idx as u8);
@@ -380,22 +379,15 @@ impl<'a,
             self.heads[i].0 = AtomicUnit::new(0);
         }
     }
-
 }
 /* create_aligned! end */
 
-
 // Run custom deallocator!
-impl<const T: usize, const C: usize, const S: usize, const L: usize>
-    Drop for [<__MPSCQ $ALIGN>]<T, C, S, L>
-{
+impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop for __MPSCQ<T, C, S, L> {
     fn drop(&mut self) {
         let f = self.dealloc;
         f(&mut self.buffer as *mut u8, S, L);
     }
-}
-    }
-    )*)
 }
 
 /*
@@ -403,7 +395,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
 */
 
 impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
-    for __MPSCQ128<T, C, S, L>
+    for __MPSCQ<T, C, S, L>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "heads: ")?;
@@ -413,10 +405,6 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
         Ok(())
     }
 }
-
-// Create types for common cache alignments
-create_aligned! {32, 64, 128}
-
 /// Creates an MPSC queue using the standard allocator.
 ///
 /// Parameters:
@@ -429,25 +417,19 @@ create_aligned! {32, 64, 128}
 macro_rules! queue {
     (
         bitsize: $b:expr,
-        producers: $p:expr,
-        l1_cache: $l1:expr
+        producers: $p:expr
     ) => {{
-        if $p * 4 > $l1 {
-            panic!("Too many producers! Maximum is L1_CACHE / 4. TODO");
-        }
         use core::alloc::Layout;
-        let size = $l1 + ($p * $l1) + $p * (1 << $b);
+        let size = 1;
         let align = 1 << $b;
         let layout = Layout::from_size_align(size, align).unwrap();
         let queue = unsafe {
-            wfmpsc::paste! {
                 std::alloc::alloc(layout) as *mut
-                wfmpsc::[<__MPSCQ $l1>]::<$p, $b,
+                wfmpsc::__MPSCQ::<$p, $b,
                     // S = T * 2^C is the global buffer size
                     {$p * (1 << $b)},
                     // L = 2^C  is the thread-local capacity
                     {1 << $b}>
-            }
         };
         let q_ref = unsafe { queue.as_mut().unwrap() };
         q_ref.zero_heads_and_tails();

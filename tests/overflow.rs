@@ -14,7 +14,7 @@ push and pop operations.
 /// Check if partial writes are executed correctly on the buffer.
 #[test]
 pub fn partial_write() {
-    let (cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 4, l1_cache: 64);
+    let (cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 4);
     // push more than 15 bytes into the queue
     prod[0].push("Hello World, how are you doing".as_bytes());
     //                           ^
