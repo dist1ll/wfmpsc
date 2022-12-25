@@ -11,57 +11,76 @@ extern crate test;
 
 #[cfg(test)]
 mod _t {
+    use std::{arch::asm, time::Duration};
+
     use test::{black_box, Bencher};
     use wfmpsc::{queue, ConsumerHandle, TLQ};
-    
-    pub struct BenchConfig {
-        /// Number of producer threads. Should be set dependent on system resources.
-        producer_count: usize,
-        /// Type of CPU load with which data is pushed into the MPSC queue 
+
+    #[derive(Default, Clone, Copy)]
+    pub struct BenchCfg {
+        /// Type of CPU load with which data is pushed into the MPSC queue
         load: LoadFactor,
         /// Size of chunks inserted into the queue
         chunk_size: usize,
-        /// Burstiness of traffic. 0 means constant, homogeneous load and 
+        /// Burstiness of traffic. 0 means constant, homogeneous load and
         /// 1 means data is added in very short intensive bursts.
         burstiness: f64,
     }
+    #[derive(Default, Clone, Copy, Eq, PartialEq)]
     pub enum LoadFactor {
         /// Hammering the queue constantly
+        #[default]
         Maximum,
         /// A few dozen instructions padding
-        Medium, 
-        /// Blocking wait for short time 
-        Low
+        Medium,
+        /// Blocking wait for short time
+        Low,
     }
 
     #[bench]
     fn eval(_: &mut Bencher) {
         let cpus = num_cpus::get();
-
+        run_wfmpsc(Default::default());
         println!("You have {} cpus", cpus)
+    }
 
-    }
-    fn run_config(cfg: BenchConfig) {
-        
-    }
-   
-    fn fill_mpscq() {
+    /// Run the bench configuration on a wfmpsc queue (this crate)
+    fn run_wfmpsc(cfg: BenchCfg) {
         let mut handlers = vec![];
         let (_, prods) = queue!(
             bitsize: 4,
             producers: 8,
             l1_cache: 128
         );
-        for (idx, producer) in prods.into_iter().enumerate() {
+        for p in prods.into_iter() {
             let tmp = std::thread::spawn(move || {
-                // fill the queue ffs
-                fill_mpscq_thread(idx, producer);
+                fill_wfmpsc(cfg, p);
             });
             handlers.push(tmp);
         }
-        // empty_mpscq_thread(queue.get_consumer_handle(), 8 * ((1 << 16) - 1));
         for h in handlers {
             h.join().expect("Joining thread");
+        }
+    }
+
+    fn fill_wfmpsc<const C: usize, const L: usize>(cfg: BenchCfg, mut p: TLQ<C, L>) {
+        let chunk = vec![0u8; cfg.chunk_size];
+        loop {
+            if cfg.load == LoadFactor::Low {
+                std::thread::sleep(Duration::from_nanos(100));
+            }
+            if cfg.load == LoadFactor::Medium {
+                unsafe {
+                    asm!(
+                        "
+                        nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
+                        nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
+                        "
+                    );
+                }
+            }
+            p.push(&chunk);
+            black_box(&mut p);
         }
     }
 
@@ -79,13 +98,5 @@ mod _t {
                 counter += written_bytes;
             }
         }
-    }
-
-    fn fill_mpscq_thread<const C: usize, const L: usize>(qid: usize, tlq: TLQ<C, L>) {
-        let b = [0u8, 1, 2, 3];
-        for _ in 0u64..(2 * (1u64 << C) - 1) {
-            black_box(&tlq).push(&b);
-        }
-        eprintln!("TLQ: #{}\n{}\n", qid, tlq);
     }
 }
