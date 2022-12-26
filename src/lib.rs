@@ -420,12 +420,12 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         use core::alloc::Layout;
-        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>>();
+        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p}, { 1 << $b }>>();
         let align = 1 << $b;
         let layout = Layout::from_size_align(size, align).unwrap();
         let queue = unsafe {
             std::alloc::alloc(layout)
-                as *mut wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>
+                as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
         };
         let q_ref = unsafe { queue.as_mut().unwrap() };
         q_ref.zero_heads_and_tails();
