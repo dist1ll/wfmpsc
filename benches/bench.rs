@@ -23,6 +23,7 @@ const CFG: BenchCfg = BenchCfg {
 };
 
 pub struct BenchCfg {
+    /// Number of producer threads to be spawned
     producer_count: usize,
     /// Type of CPU load with which data is pushed into the MPSC queue
     load: LoadFactor,
@@ -46,9 +47,7 @@ pub enum LoadFactor {
 
 #[bench]
 fn eval(_: &mut Bencher) {
-    let cpus = num_cpus::get();
     run_wfmpsc();
-    println!("You have {} cpus", cpus);
 }
 
 /// Run the bench configuration on a wfmpsc queue (this crate)
@@ -81,7 +80,7 @@ fn push_wfmpsc<const C: usize, const L: usize>(mut p: TLQ<C, L>) {
                     "
                         nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
                         nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
-                        "
+                    "
                 );
             }
         }

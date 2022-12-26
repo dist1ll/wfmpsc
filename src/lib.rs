@@ -7,7 +7,6 @@
 #![feature(allocator_api)]
 
 use core::fmt::Debug;
-pub use paste::paste;
 use std::{
     fmt::Display,
     sync::atomic::{AtomicU32, Ordering},
