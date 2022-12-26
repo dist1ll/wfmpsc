@@ -8,6 +8,7 @@
 
 use core::fmt::Debug;
 use std::{
+    cell::UnsafeCell,
     fmt::Display,
     sync::atomic::{AtomicU32, Ordering},
 };
@@ -155,12 +156,10 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-pub struct RWTails<const T: usize, const C: usize>(*mut [AtomicUnit; T]);
+pub struct RWTails<const T: usize, const C: usize>(*const [AtomicUnit; T]);
 impl<const T: usize, const C: usize> RWTails<T, C> {
-    pub fn new(ptr: *mut [AtomicUnit; T]) -> Self {
-        Self {
-            0: ptr as *mut [AtomicUnit; T],
-        }
+    pub fn new(ptr: *const [AtomicUnit; T]) -> Self {
+        Self { 0: ptr }
     }
     #[inline(always)]
     pub fn read_atomic(&self, pid: usize, ord: Ordering) -> u32 {
@@ -190,16 +189,16 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
 /// A tail that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the consumer.
 #[derive(Debug)]
-pub struct ReadOnlyTail<const C: usize>(*mut AtomicUnit);
+pub struct ReadOnlyTail<const C: usize>(*const AtomicUnit);
 impl<const C: usize> ReadOnlyTail<C> {
-    pub fn new(ptr: *mut AtomicUnit) -> Self {
+    pub fn new(ptr: *const AtomicUnit) -> Self {
         Self { 0: ptr }
     }
     /// Performs an atomic read on the tail with given memory ordering.
     #[inline(always)]
     pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicUnit);
+            let atomic = &*self.0;
             atomic.load(ord)
         }
     }
@@ -208,16 +207,16 @@ impl<const C: usize> ReadOnlyTail<C> {
 /// A head that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified safely by the producer.
 #[derive(Debug)]
-pub struct ReadOnlyHead<const C: usize>(*mut AtomicUnit);
+pub struct ReadOnlyHead<const C: usize>(*const AtomicUnit);
 impl<const C: usize> ReadOnlyHead<C> {
-    pub fn new(ptr: *mut AtomicUnit) -> Self {
+    pub fn new(ptr: *const AtomicUnit) -> Self {
         Self { 0: ptr }
     }
     /// Performs an atomic read on the head with given ordering semantics.
     #[inline(always)]
     pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicUnit);
+            let atomic = &*self.0;
             atomic.load(ord)
         }
     }
@@ -251,9 +250,9 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
 /// the head references exactly 2^C element, which means the queue's
 /// ring buffer needs to have a matching capacity.
 #[derive(Debug)]
-pub struct RWHead<const C: usize>(*mut AtomicUnit);
+pub struct RWHead<const C: usize>(*const AtomicUnit);
 impl<const C: usize> RWHead<C> {
-    pub fn new(ptr: *mut AtomicUnit) -> Self {
+    pub fn new(ptr: *const AtomicUnit) -> Self {
         Self { 0: ptr }
     }
     /// Increments the head pointer, thereby committing the written
@@ -261,7 +260,7 @@ impl<const C: usize> RWHead<C> {
     #[inline]
     pub fn store_atomic(&self, val: u32, ord: Ordering) {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicUnit);
+            let atomic = &*self.0;
             atomic.store(val, ord);
         }
     }
@@ -269,7 +268,7 @@ impl<const C: usize> RWHead<C> {
     #[inline(always)]
     pub fn read_atomic(&self, ord: Ordering) -> u32 {
         unsafe {
-            let atomic = &*(self.0 as *const AtomicUnit);
+            let atomic = &*self.0;
             atomic.load(ord)
         }
     }
@@ -333,48 +332,47 @@ pub struct __MPSCQ<
     const S: usize, // size of entire global buffer (T * 2^C)
     const L: usize, // size of the thread-local buffer (2 ^ C)
 > {
-    buffer: [u8; S],
+    buffer: UnsafeCell<[u8; S]>,
     tails: __Tails<T>,
     heads: [__Head; T],
     dealloc: DeallocFn,
 }
 
 impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ<T, C, S, L> {
-    pub fn get_producer_handle(&mut self, pid: u8) -> TLQ<C, L> {
+    pub fn get_producer_handle(&self, pid: u8) -> TLQ<C, L> {
         assert!((pid as usize) < T);
         TLQ::<C, L> {
-            tail: ReadOnlyTail::new(&mut self.tails.0[pid as usize] as *mut AtomicUnit),
-            head: RWHead::new(&mut self.heads[pid as usize].0 as *mut AtomicUnit),
+            tail: ReadOnlyTail::new(&self.tails.0[pid as usize]),
+            head: RWHead::new(&self.heads[pid as usize].0 as *const AtomicUnit),
             buffer: ThreadLocalBuffer::<L>::new(
-                (&mut self.buffer as *mut u8 as usize + { pid as usize * { 1 << C } })
-                    as *mut [u8; L],
+                (self.buffer.get() as usize + { pid as usize * { 1 << C } }) as *mut [u8; L],
             ),
         }
     }
     /// Returns a consumer handle. This allows a single thread to pop data
     /// from the other producers in a safe way.
-    pub fn get_consumer_handle(&mut self) -> ConsumerHandleImpl<T, C, S, L> {
+    pub fn get_consumer_handle(&self) -> ConsumerHandleImpl<T, C, S, L> {
         let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
         for i in 0..T {
-            heads[i] = ReadOnlyHead::new(&mut self.heads[i].0 as *mut AtomicUnit);
+            heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const AtomicUnit);
         }
         ConsumerHandleImpl::<T, C, S, L> {
-            tails: RWTails::<T, C>::new(&mut self.tails.0 as *mut [AtomicUnit; T]),
+            tails: RWTails::<T, C>::new(std::ptr::addr_of!(self.tails.0)),
             heads,
-            buffer: ReadOnlyBuffer::<T, S, L>::new(&mut self.buffer as *mut [u8; S]),
+            buffer: ReadOnlyBuffer::<T, S, L>::new(self.buffer.get()),
         }
     }
-    pub fn split(&mut self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<C, L>; T]) {
+    pub fn split(&self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<C, L>; T]) {
         let mut producers: [TLQ<C, L>; T] = unsafe { std::mem::zeroed() };
         for (idx, prod) in producers.iter_mut().enumerate() {
             *prod = self.get_producer_handle(idx as u8);
         }
         (self.get_consumer_handle(), producers)
     }
-    pub fn zero_heads_and_tails(&mut self) {
+    pub fn zero_heads_and_tails(&self) {
         for i in 0..T {
-            self.tails.0[i] = AtomicUnit::new(0);
-            self.heads[i].0 = AtomicUnit::new(0);
+            self.tails.0[i].store(0, Ordering::Release);
+            self.heads[i].0.store(0, Ordering::Release);
         }
     }
 }
@@ -384,7 +382,6 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
 impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop for __MPSCQ<T, C, S, L> {
     fn drop(&mut self) {
         let f = self.dealloc;
-        f(&mut self.buffer as *mut u8, S, L);
     }
 }
 
@@ -419,7 +416,7 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         use core::alloc::Layout;
-        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p}, { 1 << $b }>>();
+        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>>();
         let align = 1 << $b;
         let layout = Layout::from_size_align(size, align).unwrap();
         let queue = unsafe {

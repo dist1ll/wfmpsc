@@ -55,7 +55,7 @@ fn eval(_: &mut Bencher) {
 /// Run the bench configuration on a wfmpsc queue (this crate)
 fn run_wfmpsc() {
     let mut handlers = vec![];
-    let total_bytes = 100 * (1 << CFG.queue_size); // 100 times queue size
+    let total_bytes = 10 * (1 << CFG.queue_size); // 100 times queue size
     let (consumer, prods) = queue!(
         bitsize: { CFG.queue_size },
         producers: { CFG.producer_count }
@@ -85,10 +85,8 @@ fn push_wfmpsc<const C: usize, const L: usize>(mut p: TLQ<C, L>, bytes: usize) {
         if CFG.load == LoadFactor::Medium {
             unsafe {
                 asm!(
-                    "
-                        nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
-                        nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
-                    "
+                    "nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
+                     nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n"
                 );
             }
         }
@@ -106,6 +104,7 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
             break;
         }
         for i in 0..p_count {
+            eprintln!("{}", i);
             let written_bytes = c.pop_elements_into(i, &mut destination_buffer);
             counter += written_bytes;
         }
