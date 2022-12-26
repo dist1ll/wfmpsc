@@ -343,7 +343,7 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
         assert!((pid as usize) < T);
         TLQ::<C, L> {
             tail: ReadOnlyTail::new(&self.tails.0[pid as usize]),
-            head: RWHead::new(&self.heads[pid as usize].0 as *const AtomicUnit),
+            head: RWHead::new(&self.heads[pid as usize].0),
             buffer: ThreadLocalBuffer::<L>::new(
                 (self.buffer.get() as usize + { pid as usize * { 1 << C } }) as *mut [u8; L],
             ),
@@ -354,7 +354,7 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
     pub fn get_consumer_handle(&self) -> ConsumerHandleImpl<T, C, S, L> {
         let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
         for i in 0..T {
-            heads[i] = ReadOnlyHead::new(&self.heads[i].0 as *const AtomicUnit);
+            heads[i] = ReadOnlyHead::new(&self.heads[i].0);
         }
         ConsumerHandleImpl::<T, C, S, L> {
             tails: RWTails::<T, C>::new(std::ptr::addr_of!(self.tails.0)),
