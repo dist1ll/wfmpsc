@@ -312,16 +312,16 @@ impl<const C: usize> Display for RWHead<C> {
 pub type DeallocFn = fn(*mut u8, usize, usize);
 
 /// Array of cache-aligned queue tails
-#[cfg_attr(l1_size = "32", repr(C, align(32)))]
-#[cfg_attr(l1_size = "64", repr(C, align(64)))]
-#[cfg_attr(l1_size = "128", repr(C, align(128)))]
+#[cfg_attr(cache_line = "32", repr(C, align(32)))]
+#[cfg_attr(cache_line = "64", repr(C, align(64)))]
+#[cfg_attr(cache_line = "128", repr(C, align(128)))]
 #[derive(Debug)]
 pub struct __Tails<const T: usize>(pub [AtomicUnit; T]);
 
 /// Single queue head
-#[cfg_attr(l1_size = "32", repr(C, align(32)))]
-#[cfg_attr(l1_size = "64", repr(C, align(64)))]
-#[cfg_attr(l1_size = "128", repr(C, align(128)))]
+#[cfg_attr(cache_line = "32", repr(C, align(32)))]
+#[cfg_attr(cache_line = "64", repr(C, align(64)))]
+#[cfg_attr(cache_line = "128", repr(C, align(128)))]
 #[derive(Debug)]
 pub struct __Head(pub AtomicUnit);
 

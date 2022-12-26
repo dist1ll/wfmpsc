@@ -17,12 +17,14 @@ use wfmpsc::{queue, ConsumerHandle, TLQ};
 /// To make runs with different configurations, we pass the correct env variables
 /// at build time.
 const CFG: BenchCfg = BenchCfg {
+    queue_size: 4,
     producer_count: 1,
     load: LoadFactor::Maximum,
     chunk_size: 1,
 };
 
 pub struct BenchCfg {
+    queue_size: usize,
     /// Number of producer threads to be spawned
     producer_count: usize,
     /// Type of CPU load with which data is pushed into the MPSC queue
@@ -53,24 +55,30 @@ fn eval(_: &mut Bencher) {
 /// Run the bench configuration on a wfmpsc queue (this crate)
 fn run_wfmpsc() {
     let mut handlers = vec![];
-    let (_, prods) = queue!(
-        bitsize: 4,
+    let total_bytes = 100 * (1 << CFG.queue_size); // 100 times queue size
+    let (consumer, prods) = queue!(
+        bitsize: { CFG.queue_size },
         producers: { CFG.producer_count }
     );
     for p in prods.into_iter() {
         let tmp = std::thread::spawn(move || {
-            push_wfmpsc(p);
+            push_wfmpsc(p, total_bytes);
         });
         handlers.push(tmp);
     }
+    pop_wfmpsc(consumer, total_bytes);
     for h in handlers {
         h.join().expect("Joining thread");
     }
 }
 
-fn push_wfmpsc<const C: usize, const L: usize>(mut p: TLQ<C, L>) {
-    let chunk = vec![0u8; CFG.chunk_size];
-    loop {
+fn push_wfmpsc<const C: usize, const L: usize>(mut p: TLQ<C, L>, bytes: usize) {
+    let mut chunk = vec![0u8; CFG.chunk_size];
+    for _ in 0..(bytes / CFG.chunk_size) {
+        black_box(&mut chunk);
+        p.push(&chunk);
+        black_box(&mut p);
+        // waste time to reducer queue load
         if CFG.load == LoadFactor::Low {
             std::thread::sleep(Duration::from_nanos(100));
         }
@@ -84,23 +92,23 @@ fn push_wfmpsc<const C: usize, const L: usize>(mut p: TLQ<C, L>) {
                 );
             }
         }
-        p.push(&chunk);
-        black_box(&mut p);
     }
 }
 
 /// Blocking function that empties the MPSCQ until a total number of
 /// `elem_count` elements have been popped in total.
-fn pop_wfmpsc(c: impl ConsumerHandle, elem_count: usize) {
+fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     let mut counter: usize = 0;
     let mut destination_buffer = [0u8; 1 << 8]; // uart dummy
+    let p_count = c.get_producer_count();
     loop {
-        if counter >= elem_count {
-            return;
+        if counter >= bytes {
+            break;
         }
-        for i in 0..c.get_producer_count() {
+        for i in 0..p_count {
             let written_bytes = c.pop_elements_into(i, &mut destination_buffer);
             counter += written_bytes;
         }
+        eprintln!("{}", counter);
     }
 }

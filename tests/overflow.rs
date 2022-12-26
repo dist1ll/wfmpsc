@@ -11,7 +11,6 @@ This test checks if indexing is correctly implemented for overlapping concurrent
 push and pop operations.
 */
 
-
 /// Check if partial writes are executed correctly on the buffer.
 #[test]
 pub fn partial_write() {
