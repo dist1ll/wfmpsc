@@ -333,8 +333,7 @@ pub struct __MPSCQ<
     const C: usize, // bitwidth of queue size
     const S: usize, // size of entire global buffer (T * 2^C)
     const L: usize, // size of the thread-local buffer (2 ^ C)
->
-{
+> {
     buffer: [u8; S],
     tails: __Tails<T>,
     heads: [__Head; T],
@@ -405,6 +404,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
         Ok(())
     }
 }
+
 /// Creates an MPSC queue using the standard allocator.
 ///
 /// Parameters:
@@ -420,16 +420,12 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         use core::alloc::Layout;
-        let size = 1;
+        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>>();
         let align = 1 << $b;
         let layout = Layout::from_size_align(size, align).unwrap();
         let queue = unsafe {
-                std::alloc::alloc(layout) as *mut
-                wfmpsc::__MPSCQ::<$p, $b,
-                    // S = T * 2^C is the global buffer size
-                    {$p * (1 << $b)},
-                    // L = 2^C  is the thread-local capacity
-                    {1 << $b}>
+            std::alloc::alloc(layout)
+                as *mut wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>
         };
         let q_ref = unsafe { queue.as_mut().unwrap() };
         q_ref.zero_heads_and_tails();
@@ -442,7 +438,6 @@ macro_rules! queue {
 /// Parameters:
 ///  - bitsize(usize): number of bits of queue capacity (1 <= b <= 32)
 ///  - producers(usize): number of concurrent producers, usize
-///  - l1_cache(usize): byte size of L1 cache
 ///  - allocator(Allocator): an allocator object, using Rust alloc API.
 ///
 /// The allocator must implement the core::alloc::Allocator interface. If
@@ -452,25 +447,19 @@ macro_rules! queue_alloc {
     (
         bitsize: $b:expr,
         producers: $p:expr,
-        l1_cache: $l1:expr,
         allocator: $alloc:expr
     ) => {{
-        if $p * 4 > $l1 {
-            panic!("Too many producers! Maximum is L1_CACHE / 4. TODO");
-        }
         use core::alloc::{Allocator, Layout};
-        let size = $l1 + ($p * $l1) + $p * (1 << $b);
+        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>>();
         let align = 1 << $b;
         let layout = Layout::from_size_align(size, align).unwrap();
-        let queue = wfmpsc::paste! {
-            $alloc.allocate(layout).unwrap().as_ptr() as *mut
-            wfmpsc::[<__MPSCQ $l1>]::<$p, $b,
-                // S = T * 2^C is the global buffer size
-                {$p * (1 << $b)},
-                // L = 2^C  is the thread-local capacity
-                {1 << $b}>
+        let queue = unsafe {
+            $alloc.allocate(layout).unwrap().as_ptr()
+                as *mut wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>
         };
-        unsafe { queue.as_mut().unwrap() }
+        let q_ref = unsafe { queue.as_mut().unwrap() };
+        q_ref.zero_heads_and_tails();
+        q_ref.split()
     }};
 }
 
