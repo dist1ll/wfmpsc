@@ -513,10 +513,10 @@ macro_rules! queue_alloc {
         allocator: $alloc:expr
     ) => {{
         use core::alloc::{Allocator, Layout};
-        let layout = wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>::layout();
+        let layout = wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout();
         let queue = unsafe {
             $alloc.allocate(layout).unwrap().as_ptr()
-                as *mut wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>
+                as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
         };
         let q_ref = unsafe { queue.as_mut().unwrap() };
         q_ref.zero_heads_and_tails();
