@@ -21,7 +21,7 @@ pub fn partial_write() {
     prod[0].push("Hello World, how are you doing".as_bytes());
     //                           ^
     //                     the 'w' is the 16th letter
-
+    
     let mut dst = [0u8; 15];
     cons.pop_elements_into(0, &mut dst);
     assert_eq!("Hello World, ho", conv(&dst));

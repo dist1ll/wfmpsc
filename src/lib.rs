@@ -7,7 +7,7 @@
 #![feature(allocator_api)]
 
 use core::fmt::Debug;
-use std::{
+use core::{
     cell::UnsafeCell,
     fmt::Display,
     sync::atomic::{AtomicU32, Ordering},
@@ -31,6 +31,8 @@ pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, co
     tails: RWTails<T, C>,
     heads: [ReadOnlyHead<C>; T],
     buffer: ReadOnlyBuffer<T, S, L>,
+    refcount: *const AtomicUnit,
+    mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 }
 
 impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHandle
@@ -65,13 +67,15 @@ unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
 /// A producer handle. Use this to push data into the MPSC queue that can be
 /// read by the consumer.
 #[derive(Debug)]
-pub struct TLQ<const C: usize, const L: usize> {
+pub struct TLQ<const T: usize, const C: usize, const S: usize, const L: usize> {
     pub head: RWHead<C>,
     pub tail: ReadOnlyTail<C>,
     pub buffer: ThreadLocalBuffer<L>,
+    refcount: *const AtomicUnit,
+    mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 }
 
-impl<const C: usize, const L: usize> TLQ<C, L> {
+impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S, L> {
     /// Pushes a byte slice to the buffer. Performs a partial write if
     /// the queue is full. No error is returned.
     ///
@@ -144,7 +148,10 @@ pub fn queue_element_count<const C: usize>(head: u32, tail: u32) -> u32 {
     (1 << C) - queue_leftover_capacity::<C>(head, tail)
 }
 
-unsafe impl<const C: usize, const S: usize> Send for TLQ<C, S> {}
+unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
+    for TLQ<T, C, S, L>
+{
+}
 
 #[derive(Debug)] // TODO: Add custom debug implementation!
 pub struct ThreadLocalBuffer<const L: usize>(*mut [u8; L]);
@@ -274,7 +281,7 @@ impl<const C: usize> RWHead<C> {
     }
 }
 
-impl<const C: usize, const L: usize> Display for TLQ<C, L> {
+impl<const T: usize, const C: usize, const S: usize, const L: usize> Display for TLQ<T, C, S, L> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -311,6 +318,7 @@ impl<const C: usize> Display for RWHead<C> {
 pub type DeallocFn = fn(*mut u8, usize, usize);
 
 /// Array of cache-aligned queue tails
+#[cfg_attr(not(cache_line), repr(C, align(64)))]
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
 #[cfg_attr(cache_line = "128", repr(C, align(128)))]
@@ -318,6 +326,7 @@ pub type DeallocFn = fn(*mut u8, usize, usize);
 pub struct __Tails<const T: usize>(pub [AtomicUnit; T]);
 
 /// Single queue head
+#[cfg_attr(not(cache_line), repr(C, align(64)))]
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
 #[cfg_attr(cache_line = "128", repr(C, align(128)))]
@@ -326,6 +335,10 @@ pub struct __Head(pub AtomicUnit);
 
 /// MPSCQ table that stores tail and head as offsets into TLQs. S is the max
 /// number of elements in all TLQs combined. So S = T * 2^C
+#[cfg_attr(not(cache_line), repr(C, align(64)))]
+#[cfg_attr(cache_line = "32", repr(C, align(32)))]
+#[cfg_attr(cache_line = "64", repr(C, align(64)))]
+#[cfg_attr(cache_line = "128", repr(C, align(128)))]
 pub struct __MPSCQ<
     const T: usize, // number of producers
     const C: usize, // bitwidth of queue size
@@ -335,19 +348,31 @@ pub struct __MPSCQ<
     buffer: UnsafeCell<[u8; S]>,
     tails: __Tails<T>,
     heads: [__Head; T],
-    dealloc: DeallocFn,
+    refcount: AtomicUnit,
+    dealloc: Option<DeallocFn>,
 }
 
 impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ<T, C, S, L> {
-    pub fn get_producer_handle(&self, pid: u8) -> TLQ<C, L> {
+    pub const fn layout() -> Layout {
+        let size = core::mem::size_of::<Self>();
+        let align = core::mem::align_of::<Self>();
+        unsafe { Layout::from_size_align_unchecked(size, align) }
+    }
+    pub fn get_producer_handle(&self, pid: u8) -> TLQ<T, C, S, L> {
         assert!((pid as usize) < T);
-        TLQ::<C, L> {
+        eprintln!("363: 0x{:x}", &self.refcount as *const AtomicUnit as usize);
+        let ret = TLQ::<T, C, S, L> {
             tail: ReadOnlyTail::new(&self.tails.0[pid as usize]),
             head: RWHead::new(&self.heads[pid as usize].0),
             buffer: ThreadLocalBuffer::<L>::new(
                 (self.buffer.get() as usize + { pid as usize * { 1 << C } }) as *mut [u8; L],
             ),
-        }
+            refcount: &self.refcount,
+            mpscq_ptr: self as *const __MPSCQ<T, C, S, L>,
+        };
+        eprintln!("constructed");
+        eprintln!("0x{:x}", ret.refcount as usize);
+        ret
     }
     /// Returns a consumer handle. This allows a single thread to pop data
     /// from the other producers in a safe way.
@@ -360,13 +385,23 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
             tails: RWTails::<T, C>::new(std::ptr::addr_of!(self.tails.0)),
             heads,
             buffer: ReadOnlyBuffer::<T, S, L>::new(self.buffer.get()),
+            refcount: &self.refcount,
+            mpscq_ptr: self as *const __MPSCQ<T, C, S, L>,
         }
     }
-    pub fn split(&self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<C, L>; T]) {
-        let mut producers: [TLQ<C, L>; T] = unsafe { std::mem::zeroed() };
-        for (idx, prod) in producers.iter_mut().enumerate() {
-            *prod = self.get_producer_handle(idx as u8);
+    pub fn split(&self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<T, C, S, L>; T]) {
+        let mut producers: [MaybeUninit<TLQ<T, C, S, L>>; T] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+        for (i, p) in producers.iter_mut().enumerate() {
+            p.write(self.get_producer_handle(i as u8));
         }
+
+        // FIXME: Cannot do mem::transmute from MaybeUninit to a const generic
+        // array. See https://github.com/rust-lang/rust/issues/61956
+        let ptr = &producers as *const _ as *const _;
+        let producers = unsafe { core::ptr::read(ptr) };
+
+        self.refcount.store(T as u32 + 1, Ordering::SeqCst);
         (self.get_consumer_handle(), producers)
     }
     pub fn zero_heads_and_tails(&self) {
@@ -378,13 +413,47 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
 }
 /* create_aligned! end */
 
-// Run custom deallocator!
-impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop for __MPSCQ<T, C, S, L> {
+impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop
+    for ConsumerHandleImpl<T, C, S, L>
+{
     fn drop(&mut self) {
-        let f = self.dealloc;
+        drop_handle(unsafe { &*self.refcount }, self.mpscq_ptr);
+    }
+}
+impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop for TLQ<T, C, S, L> {
+    fn drop(&mut self) {
+        // sound because we obtained our refcount from a valid shared reference
+        eprintln!("0x{:x}", self.refcount as usize);
+        drop_handle(unsafe { &*self.refcount }, self.mpscq_ptr);
     }
 }
 
+/// Atomic ref-counting implementation. Atomically drops a consumer or producer
+/// handle.
+fn drop_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+    refcount: &AtomicUnit,
+    mpscq_ptr: *const __MPSCQ<T, C, S, L>,
+) {
+    // See: std::sync::Arc source code. Release + Acquire
+    if refcount.fetch_sub(1, Ordering::Release) != 1 {
+        eprintln!("dropped consumer!");
+        return;
+    }
+    refcount.load(Ordering::Acquire);
+    #[cfg(feature = "no_std")]
+    {
+        // TODO: drop it like it's hot
+        // TODO: do no_std deallocation
+    }
+    #[cfg(not(feature = "no_std"))]
+    {
+        eprintln!("Deallocation complete!");
+        let ptr = mpscq_ptr as *const u8 as *mut u8;
+        unsafe {
+            std::alloc::dealloc(ptr, __MPSCQ::<T, C, S, L>::layout());
+        }
+    }
+}
 /*
 
 */
@@ -416,9 +485,7 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         use core::alloc::Layout;
-        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>>();
-        let align = 1 << $b;
-        let layout = Layout::from_size_align(size, align).unwrap();
+        let layout = wfmpsc::__MPSCQ::<$p, $b, { $p * (1 << $b) }, { 1 << $b }>::layout();
         let queue = unsafe {
             std::alloc::alloc(layout)
                 as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
@@ -446,9 +513,7 @@ macro_rules! queue_alloc {
         allocator: $alloc:expr
     ) => {{
         use core::alloc::{Allocator, Layout};
-        let size = core::mem::size_of::<wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>>();
-        let align = 1 << $b;
-        let layout = Layout::from_size_align(size, align).unwrap();
+        let layout = wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>::layout();
         let queue = unsafe {
             $alloc.allocate(layout).unwrap().as_ptr()
                 as *mut wfmpsc::__MPSCQ<$p, $b, { $p * (1 << $b) }, { 1 << $b }>
@@ -468,6 +533,7 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
+use std::mem::MaybeUninit;
 
 /// A stub allocator that always returns them same given memory region.
 /// The region is given by START and SIZE parameter (address and length
