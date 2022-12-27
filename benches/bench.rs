@@ -72,7 +72,10 @@ fn run_wfmpsc() {
     }
 }
 
-fn push_wfmpsc<const C: usize, const L: usize>(mut p: TLQ<C, L>, bytes: usize) {
+fn push_wfmpsc<const T: usize, const C: usize, const S: usize, const L: usize>(
+    mut p: TLQ<T, C, S, L>,
+    bytes: usize,
+) {
     let mut chunk = vec![0u8; CFG.chunk_size];
     for _ in 0..(bytes / CFG.chunk_size) {
         black_box(&mut chunk);

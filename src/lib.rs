@@ -485,7 +485,7 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         use core::alloc::Layout;
-        let layout = wfmpsc::__MPSCQ::<$p, $b, { $p * (1 << $b) }, { 1 << $b }>::layout();
+        let layout = wfmpsc::__MPSCQ::<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout();
         let queue = unsafe {
             std::alloc::alloc(layout)
                 as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
