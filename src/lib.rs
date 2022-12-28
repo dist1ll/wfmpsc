@@ -416,8 +416,10 @@ pub fn split<const T: usize, const C: usize, const S: usize, const L: usize>(
     let producers = unsafe { core::ptr::read(prod_ptr) };
 
     // refcount is atomic, so creating a shared reference is safe.
-    let refcount = unsafe { &*addr_of_mut!((*ptr).refcount) };
+    let refcount = unsafe { &(*ptr).refcount };
     refcount.store(T as u32 + 1, Ordering::SeqCst);
+
+    zero_heads_and_tails(ptr);
     (cons_handle(ptr), producers)
 }
 
@@ -428,9 +430,9 @@ pub fn zero_heads_and_tails<const T: usize, const C: usize, const S: usize, cons
     for i in 0..T {
         // because tails are atomic, we are allowed to create a shared reference
         // with multiple aliases. Same reasoning applies for head elements.
-        let tail = unsafe { &*addr_of_mut!((*ptr).tails.0[i]) };
+        let tail = unsafe { &(*ptr).tails.0[i] };
         tail.store(0, Ordering::Release);
-        let head = unsafe { &*addr_of_mut!((*ptr).heads[i].0) };
+        let head = unsafe { &(*ptr).heads[i].0 };
         head.store(0, Ordering::Release);
     }
 }
