@@ -102,7 +102,7 @@ pub struct TLQ<const T: usize, const C: usize, const S: usize, const L: usize> {
 
 impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S, L> {
     /// Pushes a byte slice to the buffer. Performs a partial write if
-    /// the queue is full. No error is returned.
+    /// the queue is full. Returns the number of bytes written to the queue.
     ///
     /// This operation is sound as long as the TLQ's backing array is a
     /// contiguous block of 2^C bytes.
@@ -115,7 +115,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
     ///     PartialWrite,
     /// }
     /// ```
-    pub fn push(&self, byte: &[u8]) {
+    pub fn push(&self, byte: &[u8]) -> usize {
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
         let tail = self.tail.read_atomic(Ordering::Relaxed);
@@ -126,7 +126,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
         // between full and empty queues if its filled entirely.
         let len = core::cmp::min(capacity, byte.len() as u32 + 1) as usize - 1;
         if ((head + 1) & fmask_32::<C>() == tail) || byte.len() == 0 {
-            return;
+            return 0;
         }
 
         let target_wrap = (head + len as u32) & fmask_32::<C>();
@@ -154,6 +154,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
         // We don't want to increment the head before the memcpy completes!
         self.head
             .store_atomic((head + len as u32) & fmask_32::<C>(), Ordering::Release);
+        len
     }
 }
 

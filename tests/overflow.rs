@@ -52,9 +52,10 @@ fn push_wfmpsc<const T: usize, const C: usize, const S: usize, const L: usize>(
     bytes: usize,
 ) {
     let mut chunk = vec![0u8; 1];
-    for _ in 0..(bytes / 1) {
+    let mut written = 0;
+    while written < bytes {
         black_box(&mut chunk);
-        p.push(&chunk);
+        written += p.push(&chunk);
         black_box(&mut p);
     }
 }
@@ -65,16 +66,11 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     let mut counter: usize = 0;
     let mut destination_buffer = [0u8; 1 << 8]; // uart dummy
     let p_count = c.get_producer_count();
-    loop {
-        if counter >= bytes {
-            break;
-        }
+    while counter < bytes {
         for i in 0..p_count {
-            eprintln!("{}", i);
             let written_bytes = c.pop_elements_into(i, &mut destination_buffer);
             counter += written_bytes;
         }
-        eprintln!("{}", counter);
     }
 }
 
