@@ -6,7 +6,7 @@
 
 use std::hint::black_box;
 
-use wfmpsc::ConsumerHandle;
+use wfmpsc::{queue, ConsumerHandle, TLQ};
 
 /**!
 This test checks if indexing is correctly implemented for overlapping concurrent
@@ -21,26 +21,61 @@ pub fn partial_write() {
     prod[0].push("Hello World, how are you doing".as_bytes());
     //                           ^
     //                     the 'w' is the 16th letter
-    
+
     let mut dst = [0u8; 15];
     cons.pop_elements_into(0, &mut dst);
     assert_eq!("Hello World, ho", conv(&dst));
 }
 
-/// Check if partial writes are executed correctly on the buffer.
 #[test]
-pub fn pop_into_larger_slice() {
-    let (mut cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 1);
-    // push more than 15 bytes into the queue
-    prod[0].push("Hello World, how are you doing".as_bytes());
-    //                           ^
-    //                     the 'w' is the 16th letter
+pub fn concurrent_write() {
+    let mut handlers = vec![];
+    let total_bytes = 10 * (1 << 4); // 100 times queue size
+    let (consumer, prods) = queue!(
+        bitsize: 4,
+        producers: 1
+    );
+    for p in prods.into_iter() {
+        let tmp = std::thread::spawn(move || {
+            push_wfmpsc(p, total_bytes);
+        });
+        handlers.push(tmp);
+    }
+    pop_wfmpsc(consumer, total_bytes);
+    for h in handlers {
+        h.join().expect("Joining thread");
+    }
+}
 
-    let mut dst = [0u8; 1 << 8];
-    cons.pop_elements_into(0, &mut dst);
-    black_box(&mut cons);
-    cons.pop_elements_into(0, &mut dst);
-    black_box(&mut cons);
+fn push_wfmpsc<const T: usize, const C: usize, const S: usize, const L: usize>(
+    mut p: TLQ<T, C, S, L>,
+    bytes: usize,
+) {
+    let mut chunk = vec![0u8; 1];
+    for _ in 0..(bytes / 1) {
+        black_box(&mut chunk);
+        p.push(&chunk);
+        black_box(&mut p);
+    }
+}
+
+/// Blocking function that empties the MPSCQ until a total number of
+/// `elem_count` elements have been popped in total.
+fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
+    let mut counter: usize = 0;
+    let mut destination_buffer = [0u8; 1 << 8]; // uart dummy
+    let p_count = c.get_producer_count();
+    loop {
+        if counter >= bytes {
+            break;
+        }
+        for i in 0..p_count {
+            eprintln!("{}", i);
+            let written_bytes = c.pop_elements_into(i, &mut destination_buffer);
+            counter += written_bytes;
+        }
+        eprintln!("{}", counter);
+    }
 }
 
 /// utility function that converts byte slice into utf8 and unwraps

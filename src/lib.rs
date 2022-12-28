@@ -13,7 +13,7 @@ use core::{
 };
 
 use core::mem::MaybeUninit;
-use core::ptr::{addr_of, addr_of_mut};
+use core::ptr::{addr_of, addr_of_mut, copy_nonoverlapping};
 use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
@@ -45,19 +45,38 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
     for ConsumerHandleImpl<T, C, S, L>
 {
     fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
-        let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
         // We can use relaxed memory ordering, because a stale head doesn't cause
         // a data race.
+        let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
         let head = self.heads[pid].read_atomic(Ordering::Relaxed);
         let queue_element_count = queue_element_count::<C>(head, tail) as usize;
-        let write_len = core::cmp::min(queue_element_count, dst.len());
-        let tlq_base_ptr = self.buffer.get_tlq_slice(pid);
-        let src = ((tlq_base_ptr as usize) + tail as usize) as *mut u8;
-        unsafe {
-            core::ptr::copy_nonoverlapping(src, dst.as_mut_ptr(), write_len);
+
+        // TODO: Consider off-by-one error because of requirement to not let
+        // queue fill up fully (max. 2^C elements are allowed) u_u
+
+        // actual length of elements to be copied
+        let len = core::cmp::min(queue_element_count, dst.len());
+        let target_wrap = (tail + len as u32) & fmask_32::<C>();
+        let src = (self.buffer.tlq_base_ptr(pid) as usize + tail as usize) as *mut u8;
+        if target_wrap >= tail {
+            unsafe {
+                copy_nonoverlapping(src, dst.as_mut_ptr(), len);
+            }
+        } else {
+            let split_len = L - tail as usize;
+            unsafe {
+                copy_nonoverlapping(src, dst.as_mut_ptr(), split_len);
+                copy_nonoverlapping(
+                    self.buffer.tlq_base_ptr(pid),
+                    // this is guaranteed to work because we made sure that
+                    // the total number of items copied is min(elems, dst.len)
+                    (dst.as_mut_ptr() as usize + split_len) as *mut _,
+                    split_len,
+                );
+            }
         }
-        self.tails.incr_atomic_rel(pid, write_len as u32);
-        write_len
+        self.tails.incr_atomic_rel(pid, len as u32);
+        len
     }
 
     #[inline(always)]
@@ -105,7 +124,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
 
         // Limit arg bytes to queue size - 1 (because we can't distinguish)
         // between full and empty queues if its filled entirely.
-        let len = core::cmp::min(capacity, byte.len() as u32 + 1) - 1;
+        let len = core::cmp::min(capacity, byte.len() as u32 + 1) as usize - 1;
         if ((head + 1) & fmask_32::<C>() == tail) || byte.len() == 0 {
             return;
         }
@@ -123,17 +142,18 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
         else {
             // we have two make two copies
             unsafe {
-                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, C);
+                let split_len = L - head as usize;
+                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, split_len);
                 core::ptr::copy_nonoverlapping(
                     (src + C - head as usize) as *const u8,
                     self.buffer.0 as *mut u8,
-                    C - head as usize,
+                    len - split_len,
                 );
             }
         }
         // We don't want to increment the head before the memcpy completes!
         self.head
-            .store_atomic((head + len) & fmask_32::<C>(), Ordering::Release);
+            .store_atomic((head + len as u32) & fmask_32::<C>(), Ordering::Release);
     }
 }
 
@@ -242,10 +262,10 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     pub fn new(ptr: *mut [u8; S]) -> Self {
         Self { 0: ptr }
     }
-    /// Returns raw byte slice that points to the TLQ backing array with the
-    /// specified producer id.
+    /// Returns pointer to byte arr that points to the TLQ backing array with
+    /// the specified producer id.
     #[inline(always)]
-    pub fn get_tlq_slice(&self, pid: usize) -> *mut u8 {
+    pub fn tlq_base_ptr(&self, pid: usize) -> *mut u8 {
         debug_assert!(
             pid < T,
             "this queue has {} producers, but you selected a too large pid={}",
