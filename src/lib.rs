@@ -345,7 +345,7 @@ pub struct __MPSCQ<
     const S: usize, // size of entire global buffer (T * 2^C)
     const L: usize, // size of the thread-local buffer (2 ^ C)
 > {
-    buffer: UnsafeCell<[u8; S]>,
+    buffer: [u8; S],
     tails: __Tails<T>,
     heads: [__Head; T],
     refcount: AtomicUnit,
@@ -358,57 +358,80 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
         let align = core::mem::align_of::<Self>();
         unsafe { Layout::from_size_align_unchecked(size, align) }
     }
-    pub fn get_producer_handle(&self, pid: u8) -> TLQ<T, C, S, L> {
-        assert!((pid as usize) < T);
-        eprintln!("363: 0x{:x}", &self.refcount as *const AtomicUnit as usize);
-        let ret = TLQ::<T, C, S, L> {
-            tail: ReadOnlyTail::new(&self.tails.0[pid as usize]),
-            head: RWHead::new(&self.heads[pid as usize].0),
-            buffer: ThreadLocalBuffer::<L>::new(
-                (self.buffer.get() as usize + { pid as usize * { 1 << C } }) as *mut [u8; L],
-            ),
-            refcount: &self.refcount,
-            mpscq_ptr: self as *const __MPSCQ<T, C, S, L>,
-        };
-        eprintln!("constructed");
-        eprintln!("0x{:x}", ret.refcount as usize);
-        ret
-    }
-    /// Returns a consumer handle. This allows a single thread to pop data
-    /// from the other producers in a safe way.
-    pub fn get_consumer_handle(&self) -> ConsumerHandleImpl<T, C, S, L> {
-        let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
-        for i in 0..T {
-            heads[i] = ReadOnlyHead::new(&self.heads[i].0);
-        }
-        ConsumerHandleImpl::<T, C, S, L> {
-            tails: RWTails::<T, C>::new(std::ptr::addr_of!(self.tails.0)),
-            heads,
-            buffer: ReadOnlyBuffer::<T, S, L>::new(self.buffer.get()),
-            refcount: &self.refcount,
-            mpscq_ptr: self as *const __MPSCQ<T, C, S, L>,
-        }
-    }
-    pub fn split(&self) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<T, C, S, L>; T]) {
-        let mut producers: [MaybeUninit<TLQ<T, C, S, L>>; T] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-        for (i, p) in producers.iter_mut().enumerate() {
-            p.write(self.get_producer_handle(i as u8));
-        }
+}
 
-        // FIXME: Cannot do mem::transmute from MaybeUninit to a const generic
-        // array. See https://github.com/rust-lang/rust/issues/61956
-        let ptr = &producers as *const _ as *const _;
-        let producers = unsafe { core::ptr::read(ptr) };
+/// Returns a producer handle
+pub fn prod_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+    ptr: *mut __MPSCQ<T, C, S, L>,
+    pid: u8,
+) -> TLQ<T, C, S, L> {
+    assert!((pid as usize) < T);
+    let ret = TLQ::<T, C, S, L> {
+        tail: ReadOnlyTail::new(unsafe { addr_of_mut!((*ptr).tails.0[pid as usize]) }),
+        head: RWHead::new(unsafe { addr_of_mut!((*ptr).heads[pid as usize].0) }),
+        buffer: ThreadLocalBuffer::<L>::new(
+            (unsafe { addr_of_mut!((*ptr).buffer) } as usize + { pid as usize * { 1 << C } })
+                as *mut [u8; L],
+        ),
+        refcount: unsafe { addr_of_mut!((*ptr).refcount) },
+        mpscq_ptr: ptr as *const __MPSCQ<T, C, S, L>,
+    };
+    eprintln!("dude what");
+    eprintln!("0x{:x}", ret.refcount as usize);
+    ret
+}
 
-        self.refcount.store(T as u32 + 1, Ordering::SeqCst);
-        (self.get_consumer_handle(), producers)
+/// Returns a consumer handle. This allows a single thread to pop data
+/// from the other producers in a safe way.
+pub fn cons_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+    ptr: *mut __MPSCQ<T, C, S, L>,
+) -> ConsumerHandleImpl<T, C, S, L> {
+    let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
+    for i in 0..T {
+        heads[i] = ReadOnlyHead::new(unsafe { addr_of_mut!((*ptr).heads[i].0) });
     }
-    pub fn zero_heads_and_tails(&self) {
-        for i in 0..T {
-            self.tails.0[i].store(0, Ordering::Release);
-            self.heads[i].0.store(0, Ordering::Release);
-        }
+    ConsumerHandleImpl::<T, C, S, L> {
+        tails: RWTails::<T, C>::new(unsafe { addr_of_mut!((*ptr).tails.0) }),
+        heads,
+        buffer: ReadOnlyBuffer::<T, S, L>::new(unsafe { addr_of_mut!((*ptr).buffer) }),
+        refcount: unsafe { addr_of_mut!((*ptr).refcount) },
+        mpscq_ptr: ptr,
+    }
+}
+
+/// Splits a correctly allocated __MPSCQ object into a consumer and producer 
+/// array (totaling T+1 objects). These objects are internally atomically 
+/// refcounted, so the resulting objects are thread safe. 
+pub fn split<const T: usize, const C: usize, const S: usize, const L: usize>(
+    ptr: *mut __MPSCQ<T, C, S, L>,
+) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<T, C, S, L>; T]) {
+    let mut producers: [MaybeUninit<TLQ<T, C, S, L>>; T] =
+        unsafe { MaybeUninit::uninit().assume_init() };
+    for (i, p) in producers.iter_mut().enumerate() {
+        p.write(prod_handle(ptr, i as u8));
+    }
+    // FIXME: Cannot do mem::transmute from MaybeUninit to a const generic
+    // array. See https://github.com/rust-lang/rust/issues/61956
+    let prod_ptr = &producers as *const _ as *const _;
+    let producers = unsafe { core::ptr::read(prod_ptr) };
+
+    // refcount is atomic, so creating a shared reference is safe.
+    let refcount = unsafe { &*addr_of_mut!((*ptr).refcount) };
+    refcount.store(T as u32 + 1, Ordering::SeqCst);
+    (cons_handle(ptr), producers)
+}
+
+/// We don't require the allocated. 
+pub fn zero_heads_and_tails<const T: usize, const C: usize, const S: usize, const L: usize>(
+    ptr: *mut __MPSCQ<T, C, S, L>,
+) {
+    for i in 0..T {
+        // because tails are atomic, we are allowed to create a shared reference
+        // with multiple aliases. Same reasoning applies for head elements.
+        let tail = unsafe { &*addr_of_mut!((*ptr).tails.0[i]) };
+        tail.store(0, Ordering::Release);
+        let head = unsafe { &*addr_of_mut!((*ptr).heads[i].0) };
+        head.store(0, Ordering::Release);
     }
 }
 /* create_aligned! end */
@@ -490,9 +513,7 @@ macro_rules! queue {
             std::alloc::alloc(layout)
                 as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
         };
-        let q_ref = unsafe { queue.as_mut().unwrap() };
-        q_ref.zero_heads_and_tails();
-        q_ref.split()
+        wfmpsc::split(queue)
     }};
 }
 
@@ -534,6 +555,7 @@ use core::{
     ptr::NonNull,
 };
 use std::mem::MaybeUninit;
+use std::ptr::addr_of_mut;
 
 /// A stub allocator that always returns them same given memory region.
 /// The region is given by START and SIZE parameter (address and length
