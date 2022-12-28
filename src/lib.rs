@@ -8,9 +8,15 @@
 
 use core::fmt::Debug;
 use core::{
-    cell::UnsafeCell,
     fmt::Display,
     sync::atomic::{AtomicU32, Ordering},
+};
+
+use core::mem::MaybeUninit;
+use core::ptr::{addr_of, addr_of_mut};
+use core::{
+    alloc::{AllocError, Allocator, Layout},
+    ptr::NonNull,
 };
 
 /* Aliases for queue's atomic integer type */
@@ -361,7 +367,7 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
 }
 
 /// Returns a producer handle
-pub fn prod_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn prod_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
     ptr: *mut __MPSCQ<T, C, S, L>,
     pid: u8,
 ) -> TLQ<T, C, S, L> {
@@ -383,7 +389,7 @@ pub fn prod_handle<const T: usize, const C: usize, const S: usize, const L: usiz
 
 /// Returns a consumer handle. This allows a single thread to pop data
 /// from the other producers in a safe way.
-pub fn cons_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn cons_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
     ptr: *mut __MPSCQ<T, C, S, L>,
 ) -> ConsumerHandleImpl<T, C, S, L> {
     let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
@@ -399,9 +405,9 @@ pub fn cons_handle<const T: usize, const C: usize, const S: usize, const L: usiz
     }
 }
 
-/// Splits a correctly allocated __MPSCQ object into a consumer and producer 
-/// array (totaling T+1 objects). These objects are internally atomically 
-/// refcounted, so the resulting objects are thread safe. 
+/// Splits a correctly allocated __MPSCQ object into a consumer and producer
+/// array (totaling T+1 objects). These objects are internally atomically
+/// refcounted, so the resulting objects are thread safe.
 pub fn split<const T: usize, const C: usize, const S: usize, const L: usize>(
     ptr: *mut __MPSCQ<T, C, S, L>,
 ) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<T, C, S, L>; T]) {
@@ -412,19 +418,24 @@ pub fn split<const T: usize, const C: usize, const S: usize, const L: usize>(
     }
     // FIXME: Cannot do mem::transmute from MaybeUninit to a const generic
     // array. See https://github.com/rust-lang/rust/issues/61956
-    let prod_ptr = &producers as *const _ as *const _;
+    let prod_ptr = addr_of!(producers) as *const _;
     let producers = unsafe { core::ptr::read(prod_ptr) };
 
-    // refcount is atomic, so creating a shared reference is safe.
+    // SAFETY: refcount is atomic, so creating a shared reference is safe.
     let refcount = unsafe { &(*ptr).refcount };
     refcount.store(T as u32 + 1, Ordering::SeqCst);
 
+    // SAFETY: We are only allowed to turn initialized memory into a value type.
+    // When using the MPSC queue, the first thing you do is read heads and tails
+    // to determine length/capacity and continue with the read/write operation.
+    //
+    // Because of this, heads and tails MUST be initialized before being
+    // released to safe rust-land.
     zero_heads_and_tails(ptr);
     (cons_handle(ptr), producers)
 }
 
-/// We don't require the allocated. 
-pub fn zero_heads_and_tails<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn zero_heads_and_tails<const T: usize, const C: usize, const S: usize, const L: usize>(
     ptr: *mut __MPSCQ<T, C, S, L>,
 ) {
     for i in 0..T {
@@ -512,6 +523,9 @@ macro_rules! queue {
         use core::alloc::Layout;
         let layout = wfmpsc::__MPSCQ::<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout();
         let queue = unsafe {
+            // SAFETY: Turning any uninitialized memory into a value type is UB.
+            // In this queue, we make sure that any read was preceded by a store
+            // for every memory location.
             std::alloc::alloc(layout)
                 as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
         };
@@ -552,12 +566,6 @@ macro_rules! queue_alloc {
 const fn fmask_32<const B: usize>() -> u32 {
     (1 << B) - 1
 }
-use core::{
-    alloc::{AllocError, Allocator, Layout},
-    ptr::NonNull,
-};
-use std::mem::MaybeUninit;
-use std::ptr::addr_of_mut;
 
 /// A stub allocator that always returns them same given memory region.
 /// The region is given by START and SIZE parameter (address and length
