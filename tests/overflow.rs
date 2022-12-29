@@ -23,7 +23,7 @@ pub fn partial_write() {
     //                     the 'w' is the 16th letter
 
     let mut dst = [0u8; 15];
-    cons.pop_elements_into(0, &mut dst);
+    cons.pop_into(0, &mut dst);
     assert_eq!("Hello World, ho", conv(&dst));
 }
 
@@ -68,7 +68,7 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     let p_count = c.get_producer_count();
     while counter < bytes {
         for i in 0..p_count {
-            let written_bytes = c.pop_elements_into(i, &mut destination_buffer);
+            let written_bytes = c.pop_into(i, &mut destination_buffer);
             counter += written_bytes;
         }
     }

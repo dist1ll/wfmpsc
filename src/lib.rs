@@ -30,7 +30,7 @@ pub trait ConsumerHandle {
     /// From the producer given by `pid`, read at most `dst.len()` elements from its local
     /// queue, copies them into destination buffer `dst` and update the queue tail.
     /// Returns the number of elements that could be copied
-    fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize;
+    fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize;
 }
 
 pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, const L: usize> {
@@ -44,10 +44,12 @@ pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, co
 impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHandle
     for ConsumerHandleImpl<T, C, S, L>
 {
-    fn pop_elements_into(&self, pid: usize, dst: &mut [u8]) -> usize {
-        // We can use relaxed memory ordering, because a stale head doesn't cause
-        // a data race.
+    fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
+        // FIXME: Understand why relaxed causes a data race in miri. 
+        // Isn't there a data dependence between this head and the 
+        // first memcpy below? Why do we need to synchronize here?
+        // A stale head should not cause data race issues.
         let head = self.heads[pid].read_atomic(Ordering::Acquire);
         let queue_element_count = queue_element_count::<C>(head, tail) as usize;
 
@@ -116,6 +118,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
         let head = self.head.read_atomic(Ordering::Relaxed);
+        // FIXME: Same question as with pop_into()
         let tail = self.tail.read_atomic(Ordering::Acquire);
         let capacity = queue_leftover_capacity::<C>(head, tail);
 

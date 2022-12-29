@@ -105,7 +105,7 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     let p_count = c.get_producer_count();
     while counter < bytes {
         for i in 0..p_count {
-            let written_bytes = c.pop_elements_into(i, &mut destination_buffer);
+            let written_bytes = c.pop_into(i, &mut destination_buffer);
             counter += written_bytes;
         }
     }
