@@ -6,9 +6,15 @@
 #![feature(test)]
 #![feature(allocator_api)]
 
-extern crate test;
-use std::{arch::asm, time::Duration};
-use test::{black_box, Bencher};
+
+#[macro_use]
+extern crate criterion;
+use criterion::Criterion;
+
+mod cfg;
+use cfg::{atoi, conv, BenchCfg, LoadFactor};
+
+use std::{arch::asm, hint::black_box, time::Duration};
 use wfmpsc::{queue, ConsumerHandle, TLQ};
 
 /// Our wfmpsc requires certain configuration parameters to be known at compile-
@@ -17,43 +23,14 @@ use wfmpsc::{queue, ConsumerHandle, TLQ};
 /// To make runs with different configurations, we pass the correct env variables
 /// at build time.
 const CFG: BenchCfg = BenchCfg {
-    queue_size: 4,
-    producer_count: 4,
-    load: LoadFactor::Maximum,
-    chunk_size: 3,
+    queue_size: atoi(env!("WFMPSC_BENCH_QUEUE_SIZE")),
+    producer_count: atoi(env!("WFMPSC_BENCH_PRODUCER_COUNT")),
+    load: conv(env!("WFMPSC_BENCH_LOAD")),
+    chunk_size: atoi(env!("WFMPSC_BENCH_CHUNK_SIZE")),
 };
 
-pub struct BenchCfg {
-    queue_size: usize,
-    /// Number of producer threads to be spawned
-    producer_count: usize,
-    /// Type of CPU load with which data is pushed into the MPSC queue
-    load: LoadFactor,
-    /// Size of chunks inserted into the queue
-    chunk_size: usize,
-    // /// Burstiness of traffic. 0 means constant, homogeneous load and
-    // /// 1 means data is added in very short intensive bursts.
-    // burstiness: f64,
-}
-
-#[derive(Default, Clone, Copy, Eq, PartialEq)]
-pub enum LoadFactor {
-    /// Hammering the queue constantly
-    #[default]
-    Maximum,
-    /// Padding with a few dozen instructions
-    Medium,
-    /// Blocking wait for short time
-    Low,
-}
-
-#[bench]
-fn eval(_: &mut Bencher) {
-    run_wfmpsc();
-}
-
 /// Run the bench configuration on a wfmpsc queue (this crate)
-fn run_wfmpsc() {
+fn run_wfmpsc(c: &mut Criterion) {
     let mut handlers = vec![];
     let total_bytes = 10 * (1 << CFG.queue_size); // 100 times queue size
     let (consumer, prods) = queue!(
@@ -110,3 +87,10 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
         }
     }
 }
+
+/*
+ * UTILITY FUNCTIONS
+ */
+
+criterion_group!(benches, run_wfmpsc);
+criterion_main!(benches);

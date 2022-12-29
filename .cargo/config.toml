@@ -1,0 +1,5 @@
+[env]
+WFMPSC_BENCH_QUEUE_SIZE = { value = "4", force = false }
+WFMPSC_BENCH_PRODUCER_COUNT = { value = "3", force = false }
+WFMPSC_BENCH_LOAD = { value = "maximum", force = false }
+WFMPSC_BENCH_CHUNK_SIZE = { value = "3", force = false }
