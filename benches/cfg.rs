@@ -1,3 +1,14 @@
+/// Creates a compile-time configuration from environment variables. You can
+/// set them either in a shell, or via a `.cargo/config.toml` config file.
+pub const fn cfg_from_env() -> BenchCfg {
+    BenchCfg {
+        queue_size: atoi(env!("WFMPSC_BENCH_QUEUE_SIZE")),
+        producer_count: atoi(env!("WFMPSC_BENCH_PRODUCER_COUNT")),
+        load: conv(env!("WFMPSC_BENCH_LOAD")),
+        chunk_size: atoi(env!("WFMPSC_BENCH_CHUNK_SIZE")),
+    }
+    
+}
 pub struct BenchCfg {
     pub queue_size: usize,
     /// Number of producer threads to be spawned

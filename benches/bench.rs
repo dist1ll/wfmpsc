@@ -12,7 +12,7 @@ extern crate criterion;
 use criterion::Criterion;
 
 mod cfg;
-use cfg::{atoi, conv, BenchCfg, LoadFactor};
+use cfg::{BenchCfg, LoadFactor, cfg_from_env};
 
 use std::{arch::asm, hint::black_box, time::Duration};
 use wfmpsc::{queue, ConsumerHandle, TLQ};
@@ -22,12 +22,7 @@ use wfmpsc::{queue, ConsumerHandle, TLQ};
 ///
 /// To make runs with different configurations, we pass the correct env variables
 /// at build time.
-const CFG: BenchCfg = BenchCfg {
-    queue_size: atoi(env!("WFMPSC_BENCH_QUEUE_SIZE")),
-    producer_count: atoi(env!("WFMPSC_BENCH_PRODUCER_COUNT")),
-    load: conv(env!("WFMPSC_BENCH_LOAD")),
-    chunk_size: atoi(env!("WFMPSC_BENCH_CHUNK_SIZE")),
-};
+const CFG: BenchCfg = cfg_from_env();
 
 /// Run the bench configuration on a wfmpsc queue (this crate)
 fn run_wfmpsc(c: &mut Criterion) {
@@ -87,10 +82,6 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
         }
     }
 }
-
-/*
- * UTILITY FUNCTIONS
- */
 
 criterion_group!(benches, run_wfmpsc);
 criterion_main!(benches);
