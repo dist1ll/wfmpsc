@@ -18,7 +18,7 @@ use wfmpsc::{queue, ConsumerHandle, TLQ};
 /// at build time.
 const CFG: BenchCfg = BenchCfg {
     queue_size: 4,
-    producer_count: 1,
+    producer_count: 4,
     load: LoadFactor::Maximum,
     chunk_size: 3,
 };
@@ -66,7 +66,7 @@ fn run_wfmpsc() {
         });
         handlers.push(tmp);
     }
-    pop_wfmpsc(consumer, total_bytes);
+    pop_wfmpsc(consumer, total_bytes * CFG.producer_count);
     for h in handlers {
         h.join().expect("Joining thread");
     }

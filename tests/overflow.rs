@@ -33,7 +33,7 @@ pub fn concurrent_write() {
     let total_bytes = 10 * (1 << 4); // 100 times queue size
     let (consumer, prods) = queue!(
         bitsize: 4,
-        producers: 1
+        producers: 4
     );
     for p in prods.into_iter() {
         let tmp = std::thread::spawn(move || {
@@ -41,7 +41,8 @@ pub fn concurrent_write() {
         });
         handlers.push(tmp);
     }
-    pop_wfmpsc(consumer, total_bytes);
+    let producer_count = consumer.get_producer_count();
+    pop_wfmpsc(consumer, total_bytes * producer_count);
     for h in handlers {
         h.join().expect("Joining thread");
     }
@@ -71,7 +72,9 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
             let written_bytes = c.pop_into(i, &mut destination_buffer);
             counter += written_bytes;
         }
+        println!("{}", counter);
     }
+    black_box(counter);
 }
 
 /// utility function that converts byte slice into utf8 and unwraps
