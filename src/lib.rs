@@ -48,11 +48,8 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
         // We can use relaxed memory ordering, because a stale head doesn't cause
         // a data race.
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
-        let head = self.heads[pid].read_atomic(Ordering::Relaxed);
+        let head = self.heads[pid].read_atomic(Ordering::Acquire);
         let queue_element_count = queue_element_count::<C>(head, tail) as usize;
-
-        // TODO: Consider off-by-one error because of requirement to not let
-        // queue fill up fully (max. 2^C elements are allowed) u_u
 
         // actual length of elements to be copied
         let len = core::cmp::min(queue_element_count, dst.len());
@@ -71,7 +68,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
                     // this is guaranteed to work because we made sure that
                     // the total number of items copied is min(elems, dst.len)
                     (dst.as_mut_ptr() as usize + split_len) as *mut _,
-                    split_len,
+                    len - split_len,
                 );
             }
         }
@@ -118,8 +115,8 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
     pub fn push(&self, byte: &[u8]) -> usize {
         // relaxed ordering is fine, because a stale read from tail
         // does not cause a data race.
-        let tail = self.tail.read_atomic(Ordering::Relaxed);
         let head = self.head.read_atomic(Ordering::Relaxed);
+        let tail = self.tail.read_atomic(Ordering::Acquire);
         let capacity = queue_leftover_capacity::<C>(head, tail);
 
         // Limit arg bytes to queue size - 1 (because we can't distinguish)
