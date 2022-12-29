@@ -9,15 +9,17 @@ edition = "2021"
 
 [dependencies]
 
+[dev-dependencies]
+criterion = "0.4"
+
 [lib]
 bench = false
 doctest = false
 
-# Testing correct indexing of ring buffers, during overlapping concurrent
-# pop and push operations
 [[test]]
 name = "overflow"
 path = "tests/overflow.rs"
 
 [[bench]]
 name = "bench"
+harness = false
