@@ -403,8 +403,6 @@ fn prod_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
         refcount: unsafe { addr_of_mut!((*ptr).refcount) },
         mpscq_ptr: ptr as *const __MPSCQ<T, C, S, L>,
     };
-    eprintln!("dude what");
-    eprintln!("0x{:x}", ret.refcount as usize);
     ret
 }
 
@@ -480,7 +478,6 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop
 impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop for TLQ<T, C, S, L> {
     fn drop(&mut self) {
         // sound because we obtained our refcount from a valid shared reference
-        eprintln!("0x{:x}", self.refcount as usize);
         drop_handle(unsafe { &*self.refcount }, self.mpscq_ptr);
     }
 }
@@ -493,7 +490,6 @@ fn drop_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
 ) {
     // See: std::sync::Arc source code. Release + Acquire
     if refcount.fetch_sub(1, Ordering::Release) != 1 {
-        eprintln!("dropped consumer!");
         return;
     }
     refcount.load(Ordering::Acquire);
@@ -504,7 +500,6 @@ fn drop_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
     }
     #[cfg(not(feature = "no_std"))]
     {
-        eprintln!("Deallocation complete!");
         let ptr = mpscq_ptr as *const u8 as *mut u8;
         unsafe {
             std::alloc::dealloc(ptr, __MPSCQ::<T, C, S, L>::layout());
