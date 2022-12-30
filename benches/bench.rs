@@ -6,15 +6,14 @@
 #![feature(test)]
 #![feature(allocator_api)]
 
-
 #[macro_use]
 extern crate criterion;
 use criterion::Criterion;
 
 mod cfg;
-use cfg::{BenchCfg, LoadFactor, cfg_from_env};
+use cfg::{cfg_from_env, BenchCfg};
 
-use std::{arch::asm, hint::black_box, time::Duration};
+use std::hint::black_box;
 use wfmpsc::{queue, ConsumerHandle, TLQ};
 
 /// Our wfmpsc requires certain configuration parameters to be known at compile-
@@ -48,23 +47,15 @@ fn push_wfmpsc<const T: usize, const C: usize, const S: usize, const L: usize>(
     mut p: TLQ<T, C, S, L>,
     bytes: usize,
 ) {
-    let mut chunk = vec![0u8; CFG.chunk_size];
+    let chunk = vec![0u8; CFG.chunk_size];
     let mut written = 0;
     while written < bytes {
-        black_box(&mut chunk);
-        written += p.push(&chunk);
         black_box(&mut p);
+        written += p.push(&chunk);
         // waste time to reducer queue load
-        if CFG.load == LoadFactor::Low {
-            std::thread::sleep(Duration::from_nanos(100));
-        }
-        if CFG.load == LoadFactor::Medium {
-            unsafe {
-                asm!(
-                    "nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n
-                     nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n"
-                );
-            }
+        for _ in 0..CFG.dummy_count {
+            let x = 1337;
+            black_box(x);
         }
     }
 }

@@ -4,7 +4,7 @@ pub const fn cfg_from_env() -> BenchCfg {
     BenchCfg {
         queue_size: atoi(env!("WFMPSC_BENCH_QUEUE_SIZE")),
         producer_count: atoi(env!("WFMPSC_BENCH_PRODUCER_COUNT")),
-        load: conv(env!("WFMPSC_BENCH_LOAD")),
+        dummy_count: atoi(env!("WFMPSC_BENCH_DUMMY_INSTRUCTIONS")),
         chunk_size: atoi(env!("WFMPSC_BENCH_CHUNK_SIZE")),
     }
     
@@ -13,8 +13,11 @@ pub struct BenchCfg {
     pub queue_size: usize,
     /// Number of producer threads to be spawned
     pub producer_count: usize,
-    /// Type of CPU load with which data is pushed into the MPSC queue
-    pub load: LoadFactor,
+    /// Number of dummy instructions inserted between queue ops.
+    /// 0: Maximum contention
+    /// 10: A bit less contention
+    /// 1000: A lot less contention
+    pub dummy_count: usize,
     /// Size of chunks inserted into the queue
     pub chunk_size: usize,
     // /// Burstiness of traffic. 0 means constant, homogeneous load and
@@ -22,16 +25,6 @@ pub struct BenchCfg {
     // burstiness: f64,
 }
 
-#[derive(Default, Clone, Copy, Eq, PartialEq)]
-pub enum LoadFactor {
-    /// Hammering the queue constantly
-    #[default]
-    Maximum,
-    /// Padding with a few dozen instructions
-    Medium,
-    /// Blocking wait for short time
-    Low,
-}
 pub const fn atoi(s: &'static str) -> usize {
     let mut result = 0usize;
     let mut i = 0;
@@ -56,15 +49,4 @@ pub const fn str_eq(a: &'static str, b: &'static str) -> bool {
         i += 1;
     }
     true
-}
-pub const fn conv(s: &'static str) -> LoadFactor {
-    if str_eq(s, "maximum") {
-        return LoadFactor::Maximum;
-    } else if str_eq(s, "medium") {
-        return LoadFactor::Medium;
-    } else if str_eq(s, "low") {
-        return LoadFactor::Low;
-    } else {
-        panic!("LoadFactor env needs to be in [maximum, medium, low]");
-    }
 }
