@@ -48,7 +48,12 @@ pub fn concurrent_write() {
     }
 }
 
-fn push_wfmpsc<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn push_wfmpsc<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+>(
     mut p: TLQ<T, C, S, L>,
     bytes: usize,
 ) {

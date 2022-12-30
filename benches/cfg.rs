@@ -7,7 +7,6 @@ pub const fn cfg_from_env() -> BenchCfg {
         dummy_count: atoi(env!("WFMPSC_BENCH_DUMMY_INSTRUCTIONS")),
         chunk_size: atoi(env!("WFMPSC_BENCH_CHUNK_SIZE")),
     }
-    
 }
 pub struct BenchCfg {
     pub queue_size: usize,

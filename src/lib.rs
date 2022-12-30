@@ -27,13 +27,18 @@ pub trait ConsumerHandle {
     /// Returns the number of producers
     fn get_producer_count(&self) -> usize;
 
-    /// From the producer given by `pid`, read at most `dst.len()` elements from its local
-    /// queue, copies them into destination buffer `dst` and update the queue tail.
-    /// Returns the number of elements that could be copied
+    /// From the producer given by `pid`, read at most `dst.len()` elements
+    /// from its local queue, copies them into destination buffer `dst` and
+    /// update the queue tail.Returns the number of elements that were copied
     fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize;
 }
 
-pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, const L: usize> {
+pub struct ConsumerHandleImpl<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+> {
     tails: RWTails<T, C>,
     heads: [ReadOnlyHead<C>; T],
     buffer: ReadOnlyBuffer<T, S, L>,
@@ -41,13 +46,13 @@ pub struct ConsumerHandleImpl<const T: usize, const C: usize, const S: usize, co
     mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 }
 
-impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHandle
-    for ConsumerHandleImpl<T, C, S, L>
+impl<const T: usize, const C: usize, const S: usize, const L: usize>
+    ConsumerHandle for ConsumerHandleImpl<T, C, S, L>
 {
     fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
-        // FIXME: Understand why relaxed causes a data race in miri. 
-        // Isn't there a data dependence between this head and the 
+        // FIXME: Understand why relaxed causes a data race in miri.
+        // Isn't there a data dependence between this head and the
         // first memcpy below? Why do we need to synchronize here?
         // A stale head should not cause data race issues.
         let head = self.heads[pid].read_atomic(Ordering::Acquire);
@@ -56,7 +61,8 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> ConsumerHan
         // actual length of elements to be copied
         let len = core::cmp::min(queue_element_count, dst.len());
         let target_wrap = (tail + len as u32) & fmask_32::<C>();
-        let src = (self.buffer.tlq_base_ptr(pid) as usize + tail as usize) as *mut u8;
+        let src =
+            (self.buffer.tlq_base_ptr(pid) as usize + tail as usize) as *mut u8;
         if target_wrap >= tail {
             unsafe {
                 copy_nonoverlapping(src, dst.as_mut_ptr(), len);
@@ -99,7 +105,9 @@ pub struct TLQ<const T: usize, const C: usize, const S: usize, const L: usize> {
     mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 }
 
-impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S, L> {
+impl<const T: usize, const C: usize, const S: usize, const L: usize>
+    TLQ<T, C, S, L>
+{
     /// Pushes a byte slice to the buffer. Performs a partial write if
     /// the queue is full. Returns the number of bytes written to the queue.
     ///
@@ -135,7 +143,11 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
         if target_wrap >= head {
             // only make one copy
             unsafe {
-                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, len as usize);
+                core::ptr::copy_nonoverlapping(
+                    src as *const u8,
+                    dst as *mut u8,
+                    len as usize,
+                );
             }
         }
         // TODO: place this path into a seperate function, as its less likely.
@@ -143,7 +155,11 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
             // we have two make two copies
             unsafe {
                 let split_len = L - head as usize;
-                core::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, split_len);
+                core::ptr::copy_nonoverlapping(
+                    src as *const u8,
+                    dst as *mut u8,
+                    split_len,
+                );
                 core::ptr::copy_nonoverlapping(
                     (src + C - head as usize) as *const u8,
                     self.buffer.0 as *mut u8,
@@ -152,14 +168,16 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> TLQ<T, C, S
             }
         }
         // We don't want to increment the head before the memcpy completes!
-        self.head
-            .store_atomic((head + len as u32) & fmask_32::<C>(), Ordering::Release);
+        self.head.store_atomic(
+            (head + len as u32) & fmask_32::<C>(),
+            Ordering::Release,
+        );
         len
     }
 }
 
-/// Computes the remaining capacity of a ring buffer for a given head index, tail index
-/// and bit width of the queue (i.e. the total capacity).
+/// Computes the remaining capacity of a ring buffer for a given head index,
+/// tail index and bit width of the queue (i.e. the total capacity).
 #[inline(always)]
 pub fn queue_leftover_capacity<const C: usize>(head: u32, tail: u32) -> u32 {
     match head >= tail {
@@ -168,8 +186,8 @@ pub fn queue_leftover_capacity<const C: usize>(head: u32, tail: u32) -> u32 {
     }
 }
 
-/// Computes the element count of a ring buffer for a given head index, tail index and
-/// bit width of the queue (i.e. the total capacity).
+/// Computes the element count of a ring buffer for a given head index, tail
+/// index and bit width of the queue (i.e. the total capacity).
 #[inline(always)]
 pub fn queue_element_count<const C: usize>(head: u32, tail: u32) -> u32 {
     (1 << C) - queue_leftover_capacity::<C>(head, tail)
@@ -200,7 +218,8 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
         // TODO: Check that pointer arithmetics don't outperform this
         unsafe {
             let base_addr = self.0 as *mut AtomicUnit as usize;
-            let pid_pointer = base_addr + pid * core::mem::size_of::<AtomicUnit>();
+            let pid_pointer =
+                base_addr + pid * core::mem::size_of::<AtomicUnit>();
             let atomic = &*(pid_pointer as *const AtomicUnit);
             atomic.load(ord)
         }
@@ -208,8 +227,8 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
     /// Increment the tail atomically using release semantics.
     #[inline(always)]
     pub fn incr_atomic_rel(&self, pid: usize, len: u32) {
-        // NOTE: We don't need CAS or LL/SC because we are the only thread that's
-        // performing STORE operations on this memory address.
+        // NOTE: We don't need CAS or LL/SC because we are the only thread
+        // that's performing STORE operations on this memory address.
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
             let atomic = &*((self.0 as usize + pid * 4) as *mut AtomicUnit);
@@ -221,7 +240,7 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
 }
 
 /// A tail that refers to the queue of a single, specific thread-local queue.
-/// This is a read-only view! The tail may only be modified safely by the consumer.
+/// This is a read-only view! The tail may only be modified by the consumer.
 #[derive(Debug)]
 pub struct ReadOnlyTail<const C: usize>(*const AtomicUnit);
 impl<const C: usize> ReadOnlyTail<C> {
@@ -239,7 +258,7 @@ impl<const C: usize> ReadOnlyTail<C> {
 }
 
 /// A head that refers to the queue of a single, specific thread-local queue.
-/// This is a read-only view! The tail may only be modified safely by the producer.
+/// This is a read-only view! The tail may only be modified by the producer.
 #[derive(Debug)]
 pub struct ReadOnlyHead<const C: usize>(*const AtomicUnit);
 impl<const C: usize> ReadOnlyHead<C> {
@@ -258,7 +277,9 @@ impl<const C: usize> ReadOnlyHead<C> {
 
 /// A read-only view on the entire MPSC queue buffer.
 #[derive(Debug)]
-pub struct ReadOnlyBuffer<const T: usize, const S: usize, const L: usize>(*mut [u8; S]);
+pub struct ReadOnlyBuffer<const T: usize, const S: usize, const L: usize>(
+    *mut [u8; S],
+);
 impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     pub fn new(ptr: *mut [u8; S]) -> Self {
         Self { 0: ptr }
@@ -278,10 +299,9 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     }
 }
 
-/// Read & Write access to a TLQ head. May only be modified by a
-/// single producer.
-/// A head that may only be modified by exactly one thread! Also:
-/// the head references exactly 2^C element, which means the queue's
+/// Read & Write access to a TLQ head. May only be modified by a single
+/// producer. A head that may only be modified by exactly one thread!
+/// Also: the head references exactly 2^C element, which means the queue's
 /// ring buffer needs to have a matching capacity.
 #[derive(Debug)]
 pub struct RWHead<const C: usize>(*const AtomicUnit);
@@ -308,8 +328,13 @@ impl<const C: usize> RWHead<C> {
     }
 }
 
-impl<const T: usize, const C: usize, const S: usize, const L: usize> Display for TLQ<T, C, S, L> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
+    for TLQ<T, C, S, L>
+{
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
         write!(
             f,
             "Head(val): {}\nHead(addr): 0x{:x}\nBuffer: {}",
@@ -319,7 +344,10 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> Display for
 }
 
 impl<const L: usize> Display for ThreadLocalBuffer<L> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
         unsafe {
             let arr = *self.0;
             write!(f, "[ ")?;
@@ -332,7 +360,10 @@ impl<const L: usize> Display for ThreadLocalBuffer<L> {
     }
 }
 impl<const C: usize> Display for RWHead<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
         unsafe { write!(f, "{:?}", *self.0) }
     }
 }
@@ -379,7 +410,9 @@ pub struct __MPSCQ<
     dealloc: Option<DeallocFn>,
 }
 
-impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ<T, C, S, L> {
+impl<'a, const T: usize, const C: usize, const S: usize, const L: usize>
+    __MPSCQ<T, C, S, L>
+{
     pub const fn layout() -> Layout {
         let size = core::mem::size_of::<Self>();
         let align = core::mem::align_of::<Self>();
@@ -388,17 +421,27 @@ impl<'a, const T: usize, const C: usize, const S: usize, const L: usize> __MPSCQ
 }
 
 /// Returns a producer handle
-fn prod_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn prod_handle<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+>(
     ptr: *mut __MPSCQ<T, C, S, L>,
     pid: u8,
 ) -> TLQ<T, C, S, L> {
     assert!((pid as usize) < T);
     let ret = TLQ::<T, C, S, L> {
-        tail: ReadOnlyTail::new(unsafe { addr_of_mut!((*ptr).tails.0[pid as usize]) }),
-        head: RWHead::new(unsafe { addr_of_mut!((*ptr).heads[pid as usize].0) }),
+        tail: ReadOnlyTail::new(unsafe {
+            addr_of_mut!((*ptr).tails.0[pid as usize])
+        }),
+        head: RWHead::new(unsafe {
+            addr_of_mut!((*ptr).heads[pid as usize].0)
+        }),
         buffer: ThreadLocalBuffer::<L>::new(
-            (unsafe { addr_of_mut!((*ptr).buffer) } as usize + { pid as usize * { 1 << C } })
-                as *mut [u8; L],
+            (unsafe { addr_of_mut!((*ptr).buffer) } as usize + {
+                pid as usize * { 1 << C }
+            }) as *mut [u8; L],
         ),
         refcount: unsafe { addr_of_mut!((*ptr).refcount) },
         mpscq_ptr: ptr as *const __MPSCQ<T, C, S, L>,
@@ -408,17 +451,25 @@ fn prod_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
 
 /// Returns a consumer handle. This allows a single thread to pop data
 /// from the other producers in a safe way.
-fn cons_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn cons_handle<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+>(
     ptr: *mut __MPSCQ<T, C, S, L>,
 ) -> ConsumerHandleImpl<T, C, S, L> {
     let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
     for i in 0..T {
-        heads[i] = ReadOnlyHead::new(unsafe { addr_of_mut!((*ptr).heads[i].0) });
+        heads[i] =
+            ReadOnlyHead::new(unsafe { addr_of_mut!((*ptr).heads[i].0) });
     }
     ConsumerHandleImpl::<T, C, S, L> {
         tails: RWTails::<T, C>::new(unsafe { addr_of_mut!((*ptr).tails.0) }),
         heads,
-        buffer: ReadOnlyBuffer::<T, S, L>::new(unsafe { addr_of_mut!((*ptr).buffer) }),
+        buffer: ReadOnlyBuffer::<T, S, L>::new(unsafe {
+            addr_of_mut!((*ptr).buffer)
+        }),
         refcount: unsafe { addr_of_mut!((*ptr).refcount) },
         mpscq_ptr: ptr,
     }
@@ -454,7 +505,12 @@ pub fn split<const T: usize, const C: usize, const S: usize, const L: usize>(
     (cons_handle(ptr), producers)
 }
 
-fn zero_heads_and_tails<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn zero_heads_and_tails<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+>(
     ptr: *mut __MPSCQ<T, C, S, L>,
 ) {
     for i in 0..T {
@@ -475,7 +531,9 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop
         drop_handle(unsafe { &*self.refcount }, self.mpscq_ptr);
     }
 }
-impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop for TLQ<T, C, S, L> {
+impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop
+    for TLQ<T, C, S, L>
+{
     fn drop(&mut self) {
         // sound because we obtained our refcount from a valid shared reference
         drop_handle(unsafe { &*self.refcount }, self.mpscq_ptr);
@@ -484,7 +542,12 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop for TL
 
 /// Atomic ref-counting implementation. Atomically drops a consumer or producer
 /// handle.
-fn drop_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn drop_handle<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+>(
     refcount: &AtomicUnit,
     mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 ) {
@@ -513,7 +576,10 @@ fn drop_handle<const T: usize, const C: usize, const S: usize, const L: usize>(
 impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
     for __MPSCQ<T, C, S, L>
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
         write!(f, "heads: ")?;
         for (idx, h) in self.heads.iter().enumerate() {
             write!(f, "[#{}: {}] ", idx, h.0.load(Ordering::Relaxed))?;
@@ -537,7 +603,9 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         use core::alloc::Layout;
-        let layout = wfmpsc::__MPSCQ::<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout();
+        let layout =
+            wfmpsc::__MPSCQ::<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout(
+            );
         let queue = unsafe {
             // SAFETY: Turning any uninitialized memory into a value type is UB.
             // In this queue, we make sure that any read was preceded by a store
@@ -566,7 +634,8 @@ macro_rules! queue_alloc {
         allocator: $alloc:expr
     ) => {{
         use core::alloc::{Allocator, Layout};
-        let layout = wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout();
+        let layout =
+            wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout();
         let queue = unsafe {
             $alloc.allocate(layout).unwrap().as_ptr()
                 as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
@@ -588,9 +657,14 @@ const fn fmask_32<const B: usize>() -> u32 {
 /// of the memory region)
 pub struct FixedAllocStub<const START: usize, const SIZE: usize>;
 
-unsafe impl<const START: usize, const SIZE: usize> Allocator for FixedAllocStub<START, SIZE> {
+unsafe impl<const START: usize, const SIZE: usize> Allocator
+    for FixedAllocStub<START, SIZE>
+{
     fn allocate(&self, _: Layout) -> Result<NonNull<[u8]>, AllocError> {
-        match NonNull::new(core::ptr::slice_from_raw_parts_mut(START as *mut u8, SIZE)) {
+        match NonNull::new(core::ptr::slice_from_raw_parts_mut(
+            START as *mut u8,
+            SIZE,
+        )) {
             None => Err(AllocError {}),
             Some(ptr) => Ok(ptr),
         }

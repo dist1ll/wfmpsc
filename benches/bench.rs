@@ -16,11 +16,11 @@ use cfg::{cfg_from_env, BenchCfg};
 use std::{hint::black_box, time::Duration};
 use wfmpsc::{queue, ConsumerHandle, TLQ};
 
-/// Our wfmpsc requires certain configuration parameters to be known at compile-
-/// time. This is why we define a `const` config object,
+/// Our wfmpsc requires certain configuration parameters to be known at
+/// compile-time. This is why we define a `const` config object,
 ///
-/// To make runs with different configurations, we pass the correct env variables
-/// at build time.
+/// To make runs with different configurations, we pass the correct env
+/// variables at build time.
 const CFG: BenchCfg = cfg_from_env();
 
 /// Run the bench configuration on a wfmpsc queue (this crate)
@@ -28,16 +28,13 @@ fn run_wfmpsc(c: &mut Criterion) {
     c.bench_function(
         format!(
             "wfmpsc_q{}_p{}_d{}_c{}",
-            CFG.queue_size, 
-            CFG.producer_count, 
-            CFG.dummy_count, 
-            CFG.chunk_size
+            CFG.queue_size, CFG.producer_count, CFG.dummy_count, CFG.chunk_size
         )
         .as_str(),
         |b| {
             b.iter(|| {
                 let mut handlers = vec![];
-                let total_bytes = 10_000_000 / CFG.producer_count; //10Mb total data
+                let total_bytes = 10_000_000 / CFG.producer_count; //10Mb
                 let (consumer, prods) = queue!(
                     bitsize: { CFG.queue_size },
                     producers: { CFG.producer_count }
@@ -57,7 +54,12 @@ fn run_wfmpsc(c: &mut Criterion) {
     );
 }
 
-fn push_wfmpsc<const T: usize, const C: usize, const S: usize, const L: usize>(
+fn push_wfmpsc<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+>(
     mut p: TLQ<T, C, S, L>,
     bytes: usize,
 ) {
