@@ -13,7 +13,7 @@ use criterion::Criterion;
 mod cfg;
 use cfg::{cfg_from_env, BenchCfg};
 
-use std::hint::black_box;
+use std::{hint::black_box, time::Duration};
 use wfmpsc::{queue, ConsumerHandle, TLQ};
 
 /// Our wfmpsc requires certain configuration parameters to be known at compile-
@@ -25,22 +25,36 @@ const CFG: BenchCfg = cfg_from_env();
 
 /// Run the bench configuration on a wfmpsc queue (this crate)
 fn run_wfmpsc(c: &mut Criterion) {
-    let mut handlers = vec![];
-    let total_bytes = 10 * (1 << CFG.queue_size); // 100 times queue size
-    let (consumer, prods) = queue!(
-        bitsize: { CFG.queue_size },
-        producers: { CFG.producer_count }
+    c.bench_function(
+        format!(
+            "wfmpsc_q{}_p{}_d{}_c{}",
+            CFG.queue_size, 
+            CFG.producer_count, 
+            CFG.dummy_count, 
+            CFG.chunk_size
+        )
+        .as_str(),
+        |b| {
+            b.iter(|| {
+                let mut handlers = vec![];
+                let total_bytes = 10_000_000 / CFG.producer_count; //10Mb total data
+                let (consumer, prods) = queue!(
+                    bitsize: { CFG.queue_size },
+                    producers: { CFG.producer_count }
+                );
+                for p in prods.into_iter() {
+                    let tmp = std::thread::spawn(move || {
+                        push_wfmpsc(p, total_bytes);
+                    });
+                    handlers.push(tmp);
+                }
+                pop_wfmpsc(consumer, total_bytes * CFG.producer_count);
+                for h in handlers {
+                    h.join().expect("Joining thread");
+                }
+            })
+        },
     );
-    for p in prods.into_iter() {
-        let tmp = std::thread::spawn(move || {
-            push_wfmpsc(p, total_bytes);
-        });
-        handlers.push(tmp);
-    }
-    pop_wfmpsc(consumer, total_bytes * CFG.producer_count);
-    for h in handlers {
-        h.join().expect("Joining thread");
-    }
 }
 
 fn push_wfmpsc<const T: usize, const C: usize, const S: usize, const L: usize>(
@@ -74,5 +88,18 @@ fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     }
 }
 
-criterion_group!(benches, run_wfmpsc);
-criterion_main!(benches);
+criterion_group!(
+    name = fast;
+    config = Criterion::default()
+        .sample_size(10)
+        .measurement_time(Duration::from_secs(5));
+    targets = run_wfmpsc
+);
+criterion_group!(
+    name = accurate;
+    config = Criterion::default()
+        .sample_size(10)
+        .measurement_time(Duration::from_secs(5));
+    targets = run_wfmpsc
+);
+criterion_main!(fast);

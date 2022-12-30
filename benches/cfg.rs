@@ -34,19 +34,3 @@ pub const fn atoi(s: &'static str) -> usize {
     }
     result
 }
-
-pub const fn str_eq(a: &'static str, b: &'static str) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let ax = a.as_bytes();
-    let bx = b.as_bytes();
-    let mut i = 0;
-    while i < a.len() {
-        if ax[i] != bx[i] {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
