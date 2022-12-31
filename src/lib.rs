@@ -376,7 +376,6 @@ impl<const C: usize> Display for RWHead<C> {
 pub type DeallocFn = fn(*mut u8, usize, usize);
 
 /// Array of cache-aligned queue tails
-#[cfg_attr(not(cache_line), repr(C, align(64)))]
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
 #[cfg_attr(cache_line = "128", repr(C, align(128)))]
@@ -384,7 +383,6 @@ pub type DeallocFn = fn(*mut u8, usize, usize);
 pub struct __Tails<const T: usize>(pub [AtomicUnit; T]);
 
 /// Single queue head
-#[cfg_attr(not(cache_line), repr(C, align(64)))]
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
 #[cfg_attr(cache_line = "128", repr(C, align(128)))]
@@ -393,7 +391,6 @@ pub struct __Head(pub AtomicUnit);
 
 /// MPSCQ table that stores tail and head as offsets into TLQs. S is the max
 /// number of elements in all TLQs combined. So S = T * 2^C
-#[cfg_attr(not(cache_line), repr(C, align(64)))]
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
 #[cfg_attr(cache_line = "128", repr(C, align(128)))]

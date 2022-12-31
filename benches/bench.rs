@@ -100,7 +100,7 @@ criterion_group!(
 criterion_group!(
     name = accurate;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(300)
         .measurement_time(Duration::from_secs(5));
     targets = run_wfmpsc
 );
