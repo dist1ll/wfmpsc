@@ -22,8 +22,8 @@ def extract_time(s: str):
     return x
 
 def run_bench(env):
-    print('[x] compiling w/ {prod} threads, {queue_size}-bit width,' + 
-        f' {dummy} dummies, {chunk_size:4}B chunks'', end = ', flush = True)
+    print(f'[x] compiling w/ {prod} threads, {queue_size}-bit width,' + 
+        f' {dummy} dummies, {chunk_size}B chunks')
     # current_sub = sub.Popen('cat ../report.txt', # quick testing
     current_sub = sub.Popen('cargo build --release --bench bench',
         shell = True,
