@@ -45,10 +45,10 @@ def run_bench(env):
     
     if cache_line == 0:
         prefix = 'packed'
-    else if cache_line == 128:
+    elif cache_line == 128:
         prefix = 'hybrid'
 
-    bench_id = f'{prefix}_q{queue_size}_p{prod}_d{dummy}_c{chunk_size}'
+    bench_id = f'{prefix}_q{queue_size}-bit_p{prod}_d{dummy}_c{chunk_size}B chunk'
     with open("report.txt", "a") as f:
         f.write(f'{bench_id};{result}\n')
 
@@ -62,8 +62,8 @@ for cache_line in [0, 128]:
     print(f'[x] compiling {cache_line}-bit cache config (may take a while)')
     for queue_size in [8, 16, 24]:
         for prod in [int(max_prods / 2), max_prods]:
-            for dummy in [0, 100, 10_000]:
-                for chunk_size in [17, 117]:
+            for dummy in [0, 10_000, 100_000]:
+                for chunk_size in [18, 118]:
                     _env["RUSTFLAGS"] = f'--cfg cache_line="{cache_line}"'
                     _env["WFMPSC_BENCH_PRODUCER_COUNT"] = str(prod)
                     _env["WFMPSC_BENCH_QUEUE_SIZE"] = str(queue_size)

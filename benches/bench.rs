@@ -103,4 +103,4 @@ criterion_group!(
         .measurement_time(Duration::from_secs(5));
     targets = run_wfmpsc
 );
-criterion_main!(fast);
+criterion_main!(accurate);
