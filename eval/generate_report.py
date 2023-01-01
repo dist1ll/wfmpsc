@@ -62,7 +62,7 @@ for cache_line in [0, 128]:
     print(f'[x] compiling {cache_line}-bit cache config (may take a while)')
     for queue_size in [8, 16, 24]:
         for prod in [int(max_prods / 2), max_prods]:
-            for dummy in [0, 10_000, 100_000]:
+            for dummy in [0, 1_000_000, 20_000_000_000]:
                 for chunk_size in [18, 118]:
                     _env["RUSTFLAGS"] = f'--cfg cache_line="{cache_line}"'
                     _env["WFMPSC_BENCH_PRODUCER_COUNT"] = str(prod)
