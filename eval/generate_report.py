@@ -42,7 +42,13 @@ def run_bench(env):
     line = raw_out.decode('utf-8').partition('\n')[0]
     result = extract_time(line)
     print('.......DONE')
-    bench_id = f'c{cache_line}_q{queue_size}_p{prod}_d{dummy}_c{chunk_size}'
+    
+    if cache_line == 0:
+        prefix = 'packed'
+    else if cache_line == 128:
+        prefix = 'hybrid'
+
+    bench_id = f'{prefix}_q{queue_size}_p{prod}_d{dummy}_c{chunk_size}'
     with open("report.txt", "a") as f:
         f.write(f'{bench_id};{result}\n')
 
