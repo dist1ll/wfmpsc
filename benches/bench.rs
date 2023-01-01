@@ -69,9 +69,8 @@ fn push_wfmpsc<
         black_box(&mut p);
         written += p.push(&chunk);
         // waste time to reducer queue load
-        for _ in 0..CFG.dummy_count {
-            let x = 1337;
-            black_box(x);
+        for mut i in 0..CFG.dummy_count {
+            black_box(&mut i);
         }
     }
 }
