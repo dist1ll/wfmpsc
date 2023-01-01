@@ -1,3 +1,5 @@
 /target
 /tmp
 Cargo.lock
+
+*.ipynb_checkpoints/
