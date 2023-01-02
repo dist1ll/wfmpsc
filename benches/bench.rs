@@ -39,7 +39,7 @@ fn run_wfmpsc(c: &mut Criterion) {
                 let mut total = Duration::ZERO;
                 for _ in 0..iters {
                     let mut handlers = vec![];
-                    let total_bytes = 10_000_000 / CFG.producer_count; //10Mb
+                    let total_bytes = 20_000_000 / CFG.producer_count; //10Mb
                     let (consumer, prods) = queue!(
                         bitsize: { CFG.queue_size },
                         producers: { CFG.producer_count }
@@ -93,7 +93,7 @@ fn push_wfmpsc<
 /// `elem_count` elements have been popped in total.
 fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     let mut counter: usize = 0;
-    let mut destination_buffer = [0u8; 1 << 8]; // uart dummy
+    let mut destination_buffer = [0u8; 1 << 4]; // uart dummy
     let p_count = c.get_producer_count();
     while counter < bytes {
         for i in 0..p_count {
