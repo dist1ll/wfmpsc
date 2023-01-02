@@ -13,7 +13,10 @@ use criterion::Criterion;
 mod cfg;
 use cfg::{cfg_from_env, BenchCfg};
 
-use std::{hint::black_box, time::Duration};
+use std::{
+    hint::black_box,
+    time::{Duration, Instant},
+};
 use wfmpsc::{queue, ConsumerHandle, TLQ};
 
 /// Our wfmpsc requires certain configuration parameters to be known at
@@ -32,23 +35,34 @@ fn run_wfmpsc(c: &mut Criterion) {
         )
         .as_str(),
         |b| {
-            b.iter(|| {
-                let mut handlers = vec![];
-                let total_bytes = 10_000_000 / CFG.producer_count; //10Mb
-                let (consumer, prods) = queue!(
-                    bitsize: { CFG.queue_size },
-                    producers: { CFG.producer_count }
-                );
-                for p in prods.into_iter() {
-                    let tmp = std::thread::spawn(move || {
-                        push_wfmpsc(p, total_bytes);
-                    });
-                    handlers.push(tmp);
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let mut handlers = vec![];
+                    let total_bytes = 10_000_000 / CFG.producer_count; //10Mb
+                    let (consumer, prods) = queue!(
+                        bitsize: { CFG.queue_size },
+                        producers: { CFG.producer_count }
+                    );
+                    // -----------------------------------
+                    // start measuring
+                    let start = Instant::now();
+                    for p in prods.into_iter() {
+                        let tmp = std::thread::spawn(move || {
+                            push_wfmpsc(p, total_bytes);
+                        });
+                        handlers.push(tmp);
+                    }
+                    pop_wfmpsc(consumer, total_bytes * CFG.producer_count);
+                    // stop measuring
+                    // -----------------------------------
+                    total += start.elapsed();
+
+                    for h in handlers {
+                        h.join().expect("Joining thread");
+                    }
                 }
-                pop_wfmpsc(consumer, total_bytes * CFG.producer_count);
-                for h in handlers {
-                    h.join().expect("Joining thread");
-                }
+                total
             })
         },
     );
