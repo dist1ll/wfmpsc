@@ -61,13 +61,14 @@ print("Running benchmarking suite. Can take a long time")
 for cache_line in [0, 128]:
     print(f'[x] compiling {cache_line}-bit cache config (may take a while)')
     for queue_size in [8, 16, 24]:
-        for prod in [int(max_prods / 2), max_prods]:
-            for dummy in [0, 1_000_000, 20_000_000_000]:
-                for chunk_size in [18, 118]:
+        for prod in [1, 2, 4, 9]: # change this per machine
+            for dummy in [0, 50, 500]:
+                for chunk_size in [27]:
                     _env["RUSTFLAGS"] = f'--cfg cache_line="{cache_line}"'
                     _env["WFMPSC_BENCH_PRODUCER_COUNT"] = str(prod)
                     _env["WFMPSC_BENCH_QUEUE_SIZE"] = str(queue_size)
                     _env["WFMPSC_BENCH_DUMMY_INSTRUCTIONS"] = str(dummy)
+                    
                     _env["WFMPSC_BENCH_CHUNK_SIZE"] = str(chunk_size)
                     run_bench(_env)
 
