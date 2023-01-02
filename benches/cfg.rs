@@ -27,8 +27,10 @@ pub struct BenchCfg {
 pub const fn atoi(s: &'static str) -> usize {
     let mut result = 0usize;
     let mut i = 0;
-    while i < s.as_bytes().len() {
-        result += (s.as_bytes()[i] - ('0' as u8)) as usize;
+    let len = s.as_bytes().len();
+    while i < len {
+        result += ((s.as_bytes()[i] - ('0' as u8)) as usize)
+            * (usize::overflowing_pow(10, (len - i - 1) as u32).0 as usize);
         i += 1;
     }
     result
