@@ -57,7 +57,6 @@ fn run_wfmpsc(c: &mut Criterion) {
                     // stop measuring
                     // -----------------------------------
                     total += start.elapsed();
-
                     for h in handlers {
                         h.join().expect("Joining thread");
                     }
@@ -81,11 +80,18 @@ fn push_wfmpsc<
     let mut written = 0;
     while written < bytes {
         black_box(&mut p);
-        written += p.push(&chunk);
+        // let's make it exact
+        let diff = bytes - written;
+        if diff < chunk.len() {
+            written += p.push(&chunk[0..diff])
+        } else {
+            written += p.push(&chunk);
+        }
         // waste time to reducer queue load
         for mut i in 0..CFG.dummy_count {
             black_box(&mut i);
         }
+        black_box(&mut written);
     }
 }
 
@@ -93,12 +99,13 @@ fn push_wfmpsc<
 /// `elem_count` elements have been popped in total.
 fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     let mut counter: usize = 0;
-    let mut destination_buffer = [0u8; 1 << 4]; // uart dummy
+    let mut destination_buffer = [0u8; 1 << 7]; // uart dummy
     let p_count = c.get_producer_count();
     while counter < bytes {
         for i in 0..p_count {
-            let written_bytes = c.pop_into(i, &mut destination_buffer);
-            counter += written_bytes;
+            black_box(&mut destination_buffer);
+            counter += c.pop_into(i, &mut destination_buffer);
+            black_box(&mut counter);
         }
     }
 }
@@ -107,14 +114,14 @@ criterion_group!(
     name = fast;
     config = Criterion::default()
         .sample_size(10)
-        .measurement_time(Duration::from_secs(5));
+        .warm_up_time(Duration::from_secs(1));
     targets = run_wfmpsc
 );
 criterion_group!(
     name = accurate;
     config = Criterion::default()
         .sample_size(300)
-        .measurement_time(Duration::from_secs(5));
+        .warm_up_time(Duration::from_secs(2));
     targets = run_wfmpsc
 );
 criterion_main!(accurate);
