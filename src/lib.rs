@@ -63,6 +63,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
         let target_wrap = (tail + len as u32) & fmask_32::<C>();
         let src =
             (self.buffer.tlq_base_ptr(pid) as usize + tail as usize) as *mut u8;
+
         if target_wrap >= tail {
             unsafe {
                 copy_nonoverlapping(src, dst.as_mut_ptr(), len);
@@ -80,7 +81,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
                 );
             }
         }
-        self.tails.incr_atomic_rel(pid, len as u32);
+        self.tails.store_atomic(pid, target_wrap, Ordering::Release);
         len
     }
 
@@ -132,8 +133,11 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
 
         // Limit arg bytes to queue size - 1 (because we can't distinguish)
         // between full and empty queues if its filled entirely.
+        // OVERFLOW: capacity can never be zero, because head and tail are only
+        // allowed to be equal if the queue is empty.
         let len = core::cmp::min(capacity, byte.len() as u32 + 1) as usize - 1;
-        if ((head + 1) & fmask_32::<C>() == tail) || byte.len() == 0 {
+        assert!(capacity != 0);
+        if ((head + 1) & fmask_32::<C>() == tail) || len == 0 {
             return 0;
         }
 
@@ -226,15 +230,13 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
     }
     /// Increment the tail atomically using release semantics.
     #[inline(always)]
-    pub fn incr_atomic_rel(&self, pid: usize, len: u32) {
+    pub fn store_atomic(&self, pid: usize, val: u32, ord: Ordering) {
         // NOTE: We don't need CAS or LL/SC because we are the only thread
         // that's performing STORE operations on this memory address.
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
             let atomic = &*((self.0 as usize + pid * 4) as *mut AtomicUnit);
-            let curr_val = atomic.load(Ordering::Relaxed);
-            let new_val = (curr_val + len) & fmask_32::<C>();
-            atomic.store(new_val, Ordering::Release);
+            atomic.store(val, ord);
         }
     }
 }
