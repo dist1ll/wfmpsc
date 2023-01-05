@@ -165,7 +165,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
                     split_len,
                 );
                 core::ptr::copy_nonoverlapping(
-                    (src + C - head as usize) as *const u8,
+                    (src + split_len) as *const u8,
                     self.buffer.0 as *mut u8,
                     len - split_len,
                 );
