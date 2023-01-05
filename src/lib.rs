@@ -492,7 +492,7 @@ pub fn split<const T: usize, const C: usize, const S: usize, const L: usize>(
 
     // SAFETY: refcount is atomic, so creating a shared reference is safe.
     let refcount = unsafe { &(*ptr).refcount };
-    refcount.store(T as u32 + 1, Ordering::SeqCst);
+    refcount.store(T as u32 + 1, Ordering::Release);
 
     // SAFETY: We are only allowed to turn initialized memory into a value type.
     // When using the MPSC queue, the first thing you do is read heads and tails
