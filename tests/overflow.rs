@@ -30,14 +30,14 @@ pub fn partial_write() {
 #[test]
 pub fn concurrent_write() {
     let mut handlers = vec![];
-    let total_bytes = 10 * (1 << 4); // 100 times queue size
+    let total_bytes = 100_000; // 100 times queue size
     let (consumer, prods) = queue!(
-        bitsize: 4,
+        bitsize: 16,
         producers: 4
     );
     for p in prods.into_iter() {
         let tmp = std::thread::spawn(move || {
-            push_wfmpsc(p, total_bytes);
+            push_wfmpsc(p, total_bytes, 105);
         });
         handlers.push(tmp);
     }
@@ -56,8 +56,9 @@ fn push_wfmpsc<
 >(
     mut p: TLQ<T, C, S, L>,
     bytes: usize,
+    chunk_size: usize,
 ) {
-    let mut chunk = vec![0u8; 1];
+    let mut chunk = vec![0u8; chunk_size];
     let mut written = 0;
     while written < bytes {
         black_box(&mut chunk);
