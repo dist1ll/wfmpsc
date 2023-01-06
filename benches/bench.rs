@@ -30,7 +30,7 @@ const CFG: BenchCfg = cfg_from_env();
 fn run_wfmpsc(c: &mut Criterion) {
     c.bench_function(
         format!(
-            "wfmpsc_q{}_p{}_d{}_c{}",
+            "x_q{}_p{}_d{}_c{}",
             CFG.queue_size, CFG.producer_count, CFG.dummy_count, CFG.chunk_size
         )
         .as_str(),
