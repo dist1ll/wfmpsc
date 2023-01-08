@@ -46,12 +46,15 @@ fn run_wfmpsc(c: &mut Criterion) {
                         bitsize: { CFG.queue_size },
                         producers: { CFG.producer_count }
                     );
+                    core_affinity::set_for_current(CoreId { id: 0 });
                     // -----------------------------------
                     // start measuring
                     let start = Instant::now();
                     for (idx, p) in prods.into_iter().enumerate() {
                         let tmp = std::thread::spawn(move || {
-                            core_affinity::set_for_current(CoreId {id: idx});
+                            core_affinity::set_for_current(CoreId {
+                                id: idx + 1,
+                            });
                             push_wfmpsc(p, total_bytes);
                         });
                         handlers.push(tmp);
