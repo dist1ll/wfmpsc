@@ -11,6 +11,7 @@ edition = "2021"
 
 [dev-dependencies]
 criterion = "0.4"
+core_affinity = "0.7.6"
 
 [lib]
 bench = false

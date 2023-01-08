@@ -8,6 +8,8 @@
 
 #[macro_use]
 extern crate criterion;
+extern crate core_affinity;
+use core_affinity::CoreId;
 use criterion::Criterion;
 
 mod cfg;
@@ -47,8 +49,9 @@ fn run_wfmpsc(c: &mut Criterion) {
                     // -----------------------------------
                     // start measuring
                     let start = Instant::now();
-                    for p in prods.into_iter() {
+                    for (idx, p) in prods.into_iter().enumerate() {
                         let tmp = std::thread::spawn(move || {
+                            core_affinity::set_for_current(CoreId {id: idx});
                             push_wfmpsc(p, total_bytes);
                         });
                         handlers.push(tmp);
