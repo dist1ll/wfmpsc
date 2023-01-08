@@ -17,7 +17,10 @@ use cfg::{cfg_from_env, BenchCfg};
 
 use std::{
     hint::black_box,
-    sync::{atomic::{AtomicUsize, Ordering}, Arc},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use wfmpsc::{queue, ConsumerHandle, TLQ};
@@ -53,7 +56,7 @@ fn run_wfmpsc(c: &mut Criterion) {
 fn wfmpsc_bench_iteration() -> Duration {
     let mut handlers = vec![];
     let prod_counter = Arc::new(AtomicUsize::new(CFG.producer_count));
-    let total_bytes = 2_000_000 / CFG.producer_count; //2Mb
+    let total_bytes = 1_000_000 / CFG.producer_count; //2Mb
     let (consumer, prods) = queue!(
         bitsize: { CFG.queue_size },
         producers: { CFG.producer_count }
@@ -88,19 +91,13 @@ fn push_wfmpsc<
 >(
     mut p: TLQ<T, C, S, L>,
     bytes: usize,
-    prod_counter: Arc<AtomicUsize>
+    prod_counter: Arc<AtomicUsize>,
 ) {
     let chunk = vec![0u8; CFG.chunk_size];
     let mut written = 0;
     while written < bytes {
         black_box(&mut p);
-        // let's make it exact
-        let diff = bytes - written;
-        if diff < chunk.len() {
-            written += p.push(&chunk[0..diff])
-        } else {
-            written += p.push(&chunk);
-        }
+        written += p.push(&chunk);
         // waste time to reducer queue load
         for mut i in 0..CFG.dummy_count {
             black_box(&mut i);
@@ -112,10 +109,7 @@ fn push_wfmpsc<
 
 /// Blocking function that empties the MPSCQ until a total number of
 /// `elem_count` elements have been popped in total.
-fn pop_wfmpsc(
-    c: impl ConsumerHandle,
-    prod_counter: Arc<AtomicUsize>,
-) {
+fn pop_wfmpsc(c: impl ConsumerHandle, prod_counter: Arc<AtomicUsize>) {
     let mut counter: usize = 0;
     let mut destination_buffer = [0u8; 64]; // uart dummy
     let p_count = c.get_producer_count();
