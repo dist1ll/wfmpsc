@@ -63,7 +63,7 @@ for cache_line in [0, 128]:
     for queue_size in [8, 16, 24]:
         for prod in [1, 2, 4, 9]: # change this per machine
             for dummy in [0, 50, 500]:
-                for chunk_size in [105]:
+                for chunk_size in [2]:
                     _env["RUSTFLAGS"] = f'--cfg cache_line="{cache_line}"'
                     _env["WFMPSC_BENCH_PRODUCER_COUNT"] = str(prod)
                     _env["WFMPSC_BENCH_QUEUE_SIZE"] = str(queue_size)

@@ -105,7 +105,7 @@ fn push_wfmpsc<
 /// `elem_count` elements have been popped in total.
 fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
     let mut counter: usize = 0;
-    let mut destination_buffer = [0u8; 1 << 7]; // uart dummy
+    let mut destination_buffer = [0u8; 64]; // uart dummy
     let p_count = c.get_producer_count();
     while counter < bytes {
         for i in 0..p_count {
