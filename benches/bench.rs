@@ -17,6 +17,7 @@ use cfg::{cfg_from_env, BenchCfg};
 
 use std::{
     hint::black_box,
+    sync::{atomic::{AtomicUsize, Ordering}, Arc},
     time::{Duration, Instant},
 };
 use wfmpsc::{queue, ConsumerHandle, TLQ};
@@ -40,37 +41,43 @@ fn run_wfmpsc(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut total = Duration::ZERO;
                 for _ in 0..iters {
-                    let mut handlers = vec![];
-                    let total_bytes = 20_000_000 / CFG.producer_count; //10Mb
-                    let (consumer, prods) = queue!(
-                        bitsize: { CFG.queue_size },
-                        producers: { CFG.producer_count }
-                    );
-                    core_affinity::set_for_current(CoreId { id: 0 });
-                    // -----------------------------------
-                    // start measuring
-                    let start = Instant::now();
-                    for (idx, p) in prods.into_iter().enumerate() {
-                        let tmp = std::thread::spawn(move || {
-                            core_affinity::set_for_current(CoreId {
-                                id: idx + 1,
-                            });
-                            push_wfmpsc(p, total_bytes);
-                        });
-                        handlers.push(tmp);
-                    }
-                    pop_wfmpsc(consumer, total_bytes * CFG.producer_count);
-                    // stop measuring
-                    // -----------------------------------
-                    total += start.elapsed();
-                    for h in handlers {
-                        h.join().expect("Joining thread");
-                    }
+                    total += wfmpsc_bench_iteration();
                 }
                 total
             })
         },
     );
+}
+
+/// Runs a single iteration of our workload scenario and returns measurement
+fn wfmpsc_bench_iteration() -> Duration {
+    let mut handlers = vec![];
+    let prod_counter = Arc::new(AtomicUsize::new(CFG.producer_count));
+    let total_bytes = 2_000_000 / CFG.producer_count; //2Mb
+    let (consumer, prods) = queue!(
+        bitsize: { CFG.queue_size },
+        producers: { CFG.producer_count }
+    );
+    core_affinity::set_for_current(CoreId { id: 0 });
+    // -----------------------------------
+    // start measuring
+    let start = Instant::now();
+    for (idx, p) in prods.into_iter().enumerate() {
+        let pc = prod_counter.clone();
+        let tmp = std::thread::spawn(move || {
+            core_affinity::set_for_current(CoreId { id: idx + 1 });
+            push_wfmpsc(p, total_bytes, pc);
+        });
+        handlers.push(tmp);
+    }
+    pop_wfmpsc(consumer, prod_counter);
+    // stop measuring
+    // -----------------------------------
+    let result = start.elapsed();
+    for h in handlers {
+        h.join().expect("Joining thread");
+    }
+    result
 }
 
 fn push_wfmpsc<
@@ -81,6 +88,7 @@ fn push_wfmpsc<
 >(
     mut p: TLQ<T, C, S, L>,
     bytes: usize,
+    prod_counter: Arc<AtomicUsize>
 ) {
     let chunk = vec![0u8; CFG.chunk_size];
     let mut written = 0;
@@ -99,15 +107,21 @@ fn push_wfmpsc<
         }
         black_box(&mut written);
     }
+    prod_counter.fetch_sub(1, Ordering::Release);
 }
 
 /// Blocking function that empties the MPSCQ until a total number of
 /// `elem_count` elements have been popped in total.
-fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
+fn pop_wfmpsc(
+    c: impl ConsumerHandle,
+    prod_counter: Arc<AtomicUsize>,
+) {
     let mut counter: usize = 0;
     let mut destination_buffer = [0u8; 64]; // uart dummy
     let p_count = c.get_producer_count();
-    while counter < bytes {
+    // this counter is mostly in exclusive state, so checking this atomic
+    // variable causes neglible cache coherency traffic
+    while prod_counter.load(Ordering::Acquire) != 0 {
         for i in 0..p_count {
             black_box(&mut destination_buffer);
             counter += c.pop_into(i, &mut destination_buffer);
