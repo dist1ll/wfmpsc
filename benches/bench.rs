@@ -134,7 +134,7 @@ criterion_group!(
 criterion_group!(
     name = accurate;
     config = Criterion::default()
-        .sample_size(300)
+        .sample_size(100)
         .warm_up_time(Duration::from_secs(2));
     targets = run_wfmpsc
 );
