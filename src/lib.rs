@@ -9,10 +9,10 @@
 use core::fmt::Debug;
 use core::{
     fmt::Display,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::atomic::{AtomicU16, AtomicU32, Ordering},
 };
 
-use core::mem::MaybeUninit;
+use core::mem::{size_of, MaybeUninit};
 use core::ptr::{addr_of, addr_of_mut, copy_nonoverlapping};
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -20,7 +20,32 @@ use core::{
 };
 
 /* Aliases for queue's atomic integer type */
-type AtomicUnit = AtomicU32;
+/// Compressed tail index
+type utail = u16;
+/// Canocial size of indices (i.e. precise addressing of memory)
+type udefault = u32;
+type AtomicTail = AtomicU16;
+type AtomicHead = AtomicU32;
+
+#[inline(always)]
+pub const fn compress(tail: udefault, queue_bitwidth: usize) -> utail {
+    (tail >> chunk_width(queue_bitwidth)) as utail
+}
+#[inline(always)]
+pub const fn decompress(tail: utail, queue_bitwidth: usize) -> udefault {
+    (tail as udefault) << chunk_width(queue_bitwidth)
+}
+/// Width of chunks, given a queue's bitwidth. Any queue smaller than 16-bits
+/// can be precisely addressed by a 16-bit utail. If the queue is larger, then
+/// any remaining bits determine the size of chunks needed to compress the ptr.
+/// E.g. a 20-bit queue would divide the queue into 16-byte chunks
+#[inline(always)]
+pub const fn chunk_width(queue_bitwidth: usize) -> usize {
+    if queue_bitwidth <= 16 {
+        return 0;
+    }
+    queue_bitwidth - 16
+}
 
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
@@ -42,7 +67,7 @@ pub struct ConsumerHandleImpl<
     tails: RWTails<T, C>,
     heads: [ReadOnlyHead<C>; T],
     buffer: ReadOnlyBuffer<T, S, L>,
-    refcount: *const AtomicUnit,
+    refcount: *const AtomicU32,
     mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 }
 
@@ -60,7 +85,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
 
         // actual length of elements to be copied
         let len = core::cmp::min(queue_element_count, dst.len());
-        let target_wrap = (tail + len as u32) & fmask_32::<C>();
+        let target_wrap = (tail + len as udefault) & fmask_udefault::<C>();
         let src =
             (self.buffer.tlq_base_ptr(pid) as usize + tail as usize) as *mut u8;
 
@@ -102,7 +127,7 @@ pub struct TLQ<const T: usize, const C: usize, const S: usize, const L: usize> {
     pub head: RWHead<C>,
     pub tail: ReadOnlyTail<C>,
     pub buffer: ThreadLocalBuffer<L>,
-    refcount: *const AtomicUnit,
+    refcount: *const AtomicU32,
     mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 }
 
@@ -135,13 +160,15 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
         // between full and empty queues if its filled entirely.
         // OVERFLOW: capacity can never be zero, because head and tail are only
         // allowed to be equal if the queue is empty.
-        let len = core::cmp::min(capacity, byte.len() as u32 + 1) as usize - 1;
+        let len =
+            core::cmp::min(capacity, byte.len() as udefault + 1) as usize - 1;
         assert!(capacity != 0);
-        if ((head + 1) & fmask_32::<C>() == tail) || len == 0 {
+        if ((head + 1) & fmask_udefault::<C>() == tail as udefault) || len == 0
+        {
             return 0;
         }
 
-        let target_wrap = (head + len as u32) & fmask_32::<C>();
+        let target_wrap = (head + len as udefault) & fmask_udefault::<C>();
         let src = byte.as_ptr() as usize;
         let dst = self.buffer.0 as usize + head as usize;
         if target_wrap >= head {
@@ -173,7 +200,7 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
         }
         // We don't want to increment the head before the memcpy completes!
         self.head.store_atomic(
-            (head + len as u32) & fmask_32::<C>(),
+            (head + len as udefault) & fmask_udefault::<C>(),
             Ordering::Release,
         );
         len
@@ -183,18 +210,24 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
 /// Computes the remaining capacity of a ring buffer for a given head index,
 /// tail index and bit width of the queue (i.e. the total capacity).
 #[inline(always)]
-pub fn queue_leftover_capacity<const C: usize>(head: u32, tail: u32) -> u32 {
-    match head >= tail {
-        true => (1 << C) - (head - tail),
-        false => tail - head,
+pub fn queue_leftover_capacity<const C: usize>(
+    h: udefault,
+    t: udefault,
+) -> udefault {
+    match h >= t {
+        true => (1 << C) - (h - t),
+        false => t - h,
     }
 }
 
 /// Computes the element count of a ring buffer for a given head index, tail
 /// index and bit width of the queue (i.e. the total capacity).
 #[inline(always)]
-pub fn queue_element_count<const C: usize>(head: u32, tail: u32) -> u32 {
-    (1 << C) - queue_leftover_capacity::<C>(head, tail)
+pub fn queue_element_count<const C: usize>(
+    h: udefault,
+    t: udefault,
+) -> udefault {
+    (1 << C) - queue_leftover_capacity::<C>(h, t)
 }
 
 unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
@@ -212,30 +245,33 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-pub struct RWTails<const T: usize, const C: usize>(*const [AtomicUnit; T]);
+pub struct RWTails<const T: usize, const C: usize>(*const [AtomicTail; T]);
 impl<const T: usize, const C: usize> RWTails<T, C> {
-    pub fn new(ptr: *const [AtomicUnit; T]) -> Self {
+    pub fn new(ptr: *const [AtomicTail; T]) -> Self {
         Self { 0: ptr }
     }
     #[inline(always)]
-    pub fn read_atomic(&self, pid: usize, ord: Ordering) -> u32 {
+    pub fn read_atomic(&self, pid: usize, ord: Ordering) -> udefault {
         // TODO: Check that pointer arithmetics don't outperform this
         unsafe {
-            let base_addr = self.0 as *mut AtomicUnit as usize;
+            let base_addr = self.0 as *mut AtomicTail as usize;
             let pid_pointer =
-                base_addr + pid * core::mem::size_of::<AtomicUnit>();
-            let atomic = &*(pid_pointer as *const AtomicUnit);
-            atomic.load(ord)
+                base_addr + pid * core::mem::size_of::<AtomicTail>();
+            let atomic = &*(pid_pointer as *const AtomicTail);
+            let l = atomic.load(ord);
+            decompress(l, C)
         }
     }
     /// Increment the tail atomically using release semantics.
+    /// Automatically compresses the tail into the right size.
     #[inline(always)]
-    pub fn store_atomic(&self, pid: usize, val: u32, ord: Ordering) {
+    pub fn store_atomic(&self, pid: usize, val: udefault, ord: Ordering) {
+        let val = compress(val, C);
         // NOTE: We don't need CAS or LL/SC because we are the only thread
         // that's performing STORE operations on this memory address.
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
-            let atomic = &*((self.0 as usize + pid * 4) as *mut AtomicUnit);
+            let atomic = &*((self.0 as usize + pid * size_of::<AtomicTail>()) as *mut AtomicTail);
             atomic.store(val, ord);
         }
     }
@@ -244,17 +280,19 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
 /// A tail that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified by the consumer.
 #[derive(Debug)]
-pub struct ReadOnlyTail<const C: usize>(*const AtomicUnit);
+pub struct ReadOnlyTail<const C: usize>(*const AtomicTail);
 impl<const C: usize> ReadOnlyTail<C> {
-    pub fn new(ptr: *const AtomicUnit) -> Self {
+    pub fn new(ptr: *const AtomicTail) -> Self {
         Self { 0: ptr }
     }
     /// Performs an atomic read on the tail with given memory ordering.
+    /// Automatically decompresses the index
     #[inline(always)]
-    pub fn read_atomic(&self, ord: Ordering) -> u32 {
+    pub fn read_atomic(&self, ord: Ordering) -> udefault {
         unsafe {
             let atomic = &*self.0;
-            atomic.load(ord)
+            let l = atomic.load(ord);
+            decompress(l, C)
         }
     }
 }
@@ -262,14 +300,14 @@ impl<const C: usize> ReadOnlyTail<C> {
 /// A head that refers to the queue of a single, specific thread-local queue.
 /// This is a read-only view! The tail may only be modified by the producer.
 #[derive(Debug)]
-pub struct ReadOnlyHead<const C: usize>(*const AtomicUnit);
+pub struct ReadOnlyHead<const C: usize>(*const AtomicHead);
 impl<const C: usize> ReadOnlyHead<C> {
-    pub fn new(ptr: *const AtomicUnit) -> Self {
+    pub fn new(ptr: *const AtomicHead) -> Self {
         Self { 0: ptr }
     }
     /// Performs an atomic read on the head with given ordering semantics.
     #[inline(always)]
-    pub fn read_atomic(&self, ord: Ordering) -> u32 {
+    pub fn read_atomic(&self, ord: Ordering) -> udefault {
         unsafe {
             let atomic = &*self.0;
             atomic.load(ord)
@@ -306,15 +344,15 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
 /// Also: the head references exactly 2^C element, which means the queue's
 /// ring buffer needs to have a matching capacity.
 #[derive(Debug)]
-pub struct RWHead<const C: usize>(*const AtomicUnit);
+pub struct RWHead<const C: usize>(*const AtomicHead);
 impl<const C: usize> RWHead<C> {
-    pub fn new(ptr: *const AtomicUnit) -> Self {
+    pub fn new(ptr: *const AtomicHead) -> Self {
         Self { 0: ptr }
     }
     /// Increments the head pointer, thereby committing the written
     /// bytes to the consumer
     #[inline]
-    pub fn store_atomic(&self, val: u32, ord: Ordering) {
+    pub fn store_atomic(&self, val: udefault, ord: Ordering) {
         unsafe {
             let atomic = &*self.0;
             atomic.store(val, ord);
@@ -322,7 +360,7 @@ impl<const C: usize> RWHead<C> {
     }
     /// Performs an atomic read on the head with given ordering.
     #[inline(always)]
-    pub fn read_atomic(&self, ord: Ordering) -> u32 {
+    pub fn read_atomic(&self, ord: Ordering) -> udefault {
         unsafe {
             let atomic = &*self.0;
             atomic.load(ord)
@@ -382,20 +420,18 @@ pub type DeallocFn = fn(*mut u8, usize, usize);
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
 #[cfg_attr(cache_line = "128", repr(C, align(128)))]
 #[derive(Debug)]
-pub struct __Tails<const T: usize>(pub [AtomicUnit; T]);
+pub struct __Tails<const T: usize>(pub [AtomicTail; T]);
 
 /// Single queue head
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
 #[cfg_attr(cache_line = "128", repr(C, align(128)))]
 #[derive(Debug)]
-pub struct __Head(pub AtomicUnit);
+pub struct __Head(pub AtomicHead);
 
 /// MPSCQ table that stores tail and head as offsets into TLQs. S is the max
 /// number of elements in all TLQs combined. So S = T * 2^C
-#[cfg_attr(cache_line = "32", repr(C, align(32)))]
-#[cfg_attr(cache_line = "64", repr(C, align(64)))]
-#[cfg_attr(cache_line = "128", repr(C, align(128)))]
+#[repr(C, align(128))]
 pub struct __MPSCQ<
     const T: usize, // number of producers
     const C: usize, // bitwidth of queue size
@@ -405,7 +441,7 @@ pub struct __MPSCQ<
     buffer: [u8; S],
     tails: __Tails<T>,
     heads: [__Head; T],
-    refcount: AtomicUnit,
+    refcount: AtomicU32,
     dealloc: Option<DeallocFn>,
 }
 
@@ -547,7 +583,7 @@ fn drop_handle<
     const S: usize,
     const L: usize,
 >(
-    refcount: &AtomicUnit,
+    refcount: &AtomicU32,
     mpscq_ptr: *const __MPSCQ<T, C, S, L>,
 ) {
     // See: std::sync::Arc source code. Release + Acquire
@@ -647,7 +683,7 @@ macro_rules! queue_alloc {
 
 /// Returns 0xfff..., where `B` is the number of `f`s.
 #[inline(always)]
-const fn fmask_32<const B: usize>() -> u32 {
+const fn fmask_udefault<const B: usize>() -> udefault {
     (1 << B) - 1
 }
 

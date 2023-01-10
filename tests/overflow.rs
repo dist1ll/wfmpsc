@@ -33,7 +33,7 @@ pub fn concurrent_write() {
     let total_bytes = 100_000; // 100 times queue size
     let (consumer, prods) = queue!(
         bitsize: 16,
-        producers: 4
+        producers: 2
     );
     for p in prods.into_iter() {
         let tmp = std::thread::spawn(move || {
