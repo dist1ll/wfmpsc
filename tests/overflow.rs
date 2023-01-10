@@ -32,7 +32,7 @@ pub fn concurrent_write() {
     let mut handlers = vec![];
     let total_bytes = 100_000; // 100 times queue size
     let (consumer, prods) = queue!(
-        bitsize: 16,
+        bitsize: 15,
         producers: 2
     );
     for p in prods.into_iter() {
