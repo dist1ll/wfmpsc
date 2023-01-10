@@ -64,7 +64,7 @@ max_prods = os.cpu_count() - 1
 print("Running benchmarking suite. Can take a long time")
 for cache_line in [0, 128]:
     print(f'[x] compiling {cache_line}-bit cache config (may take a while)')
-    for queue_size in [8, 16, 24]:
+    for queue_size in [15]:
         for prod in [1, 2, 4, 9]: # change this per machine
             for dummy in [0, 50, 500]:
                 for chunk_size in [2]:
