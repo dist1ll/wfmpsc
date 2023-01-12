@@ -55,24 +55,26 @@ fn run_wfmpsc(c: &mut Criterion) {
 /// Runs a single iteration of our workload scenario and returns measurement
 fn wfmpsc_bench_iteration() -> Duration {
     let mut handlers = vec![];
-    let prod_counter = Arc::new(AtomicUsize::new(CFG.producer_count));
+    let prod_counter = Arc::new(AtomicUsize::new(0));
     let total_bytes = 1_000_000 / CFG.producer_count; //2Mb
     let (consumer, prods) = queue!(
         bitsize: { CFG.queue_size },
         producers: { CFG.producer_count }
     );
     core_affinity::set_for_current(CoreId { id: 0 });
-    // -----------------------------------
-    // start measuring
-    let start = Instant::now();
     for (idx, p) in prods.into_iter().enumerate() {
         let pc = prod_counter.clone();
         let tmp = std::thread::spawn(move || {
             core_affinity::set_for_current(CoreId { id: idx + 1 });
+            while pc.load(Ordering::Acquire) == 0 {} // pseudo semaphore
             push_wfmpsc(p, total_bytes, pc);
         });
         handlers.push(tmp);
     }
+    let start = Instant::now();
+    // -----------------------------------
+    // start measuring
+    prod_counter.store(CFG.producer_count, Ordering::Release);
     pop_wfmpsc(consumer, prod_counter);
     // stop measuring
     // -----------------------------------
@@ -126,8 +128,8 @@ fn pop_wfmpsc(c: impl ConsumerHandle, prod_counter: Arc<AtomicUsize>) {
 
 criterion_group!(
     name = fast;
-    config = Criterion::default()
-        .sample_size(10)
+   config = Criterion::default()
+        .measurement_time(Duration::from_secs(1))
         .warm_up_time(Duration::from_secs(1));
     targets = run_wfmpsc
 );
@@ -138,4 +140,4 @@ criterion_group!(
         .warm_up_time(Duration::from_secs(2));
     targets = run_wfmpsc
 );
-criterion_main!(accurate);
+criterion_main!(fast);
