@@ -49,7 +49,7 @@ def run_bench(env):
     
     if cache_line == 0:
         prefix = 'packed'
-    elif cache_line == 128:
+    else:
         prefix = 'hybrid'
 
     bench_id = f'{prefix}_q{queue_size}-bit_p{prod}_d{dummy}_c{chunk_size}B chunk'
