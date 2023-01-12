@@ -271,7 +271,8 @@ impl<const T: usize, const C: usize> RWTails<T, C> {
         // that's performing STORE operations on this memory address.
         unsafe {
             // Bitmask wrap increment, using bitwidth of queue C
-            let atomic = &*((self.0 as usize + pid * size_of::<AtomicTail>()) as *mut AtomicTail);
+            let atomic = &*((self.0 as usize + pid * size_of::<AtomicTail>())
+                as *mut AtomicTail);
             atomic.store(val, ord);
         }
     }
@@ -591,16 +592,18 @@ fn drop_handle<
         return;
     }
     refcount.load(Ordering::Acquire);
-    #[cfg(feature = "no_std")]
+
+    let layout = __MPSCQ::<T, C, S, L>::layout();
+    #[cfg(not(feature = "std"))]
     {
-        // TODO: drop it like it's hot
-        // TODO: do no_std deallocation
+        let f = unsafe { addr_of!((*mpscq_ptr).dealloc.unwrap()) };
+        f(ptr, layout.size, layout.align);
     }
-    #[cfg(not(feature = "no_std"))]
+    #[cfg(feature = "std")]
     {
         let ptr = mpscq_ptr as *const u8 as *mut u8;
         unsafe {
-            std::alloc::dealloc(ptr, __MPSCQ::<T, C, S, L>::layout());
+            std::alloc::dealloc(ptr, layout);
         }
     }
 }

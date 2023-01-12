@@ -6,12 +6,20 @@ repository = "https://foss.alic.dev/dist1ll/wfmpsc"
 description = "Wait-free, cache-aware MPSC queue for serial output"
 autotests = false
 edition = "2021"
+resolver = "2"
+
+[features]
+std = []
 
 [dependencies]
 
 [dev-dependencies]
+# workaround for lack of test-specific features
+# https://github.com/rust-lang/cargo/issues/2911#issuecomment-749580481
+wfmpsc = { path = ".", features = ["std"] }
 criterion = "0.4"
 core_affinity = "0.7.6"
+
 
 [lib]
 bench = false
