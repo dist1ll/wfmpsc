@@ -4,7 +4,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-use std::hint::black_box;
+use std::{
+    hint::black_box,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use wfmpsc::{queue, ConsumerHandle, TLQ};
 
@@ -30,19 +36,21 @@ pub fn partial_write() {
 #[test]
 pub fn concurrent_write() {
     let mut handlers = vec![];
-    let total_bytes = 100_000; // 100 times queue size
+    let total_bytes = 1_000_000; // 100 times queue size
+    const prod_count: usize = 8;
     let (consumer, prods) = queue!(
         bitsize: 15,
-        producers: 2
+        producers: prod_count
     );
+    let prod_counter = Arc::new(AtomicUsize::new(prod_count));
     for p in prods.into_iter() {
+        let pc = prod_counter.clone();
         let tmp = std::thread::spawn(move || {
-            push_wfmpsc(p, total_bytes, 105);
+            push_wfmpsc(p, total_bytes, 105, pc);
         });
         handlers.push(tmp);
     }
-    let producer_count = consumer.get_producer_count();
-    pop_wfmpsc(consumer, total_bytes * producer_count);
+    pop_wfmpsc(consumer, prod_counter);
     for h in handlers {
         h.join().expect("Joining thread");
     }
@@ -57,6 +65,7 @@ fn push_wfmpsc<
     mut p: TLQ<T, C, S, L>,
     bytes: usize,
     chunk_size: usize,
+    pc: Arc<AtomicUsize>,
 ) {
     let mut chunk = vec![0u8; chunk_size];
     let mut written = 0;
@@ -65,15 +74,16 @@ fn push_wfmpsc<
         written += p.push(&chunk);
         black_box(&mut p);
     }
+    pc.fetch_sub(1, Ordering::Release);
 }
 
 /// Blocking function that empties the MPSCQ until a total number of
 /// `elem_count` elements have been popped in total.
-fn pop_wfmpsc(c: impl ConsumerHandle, bytes: usize) {
+fn pop_wfmpsc(c: impl ConsumerHandle, pc: Arc<AtomicUsize>) {
     let mut counter: usize = 0;
     let mut destination_buffer = [0u8; 1 << 8]; // uart dummy
     let p_count = c.get_producer_count();
-    while counter < bytes {
+    while pc.load(Ordering::Acquire) != 0 {
         for i in 0..p_count {
             let written_bytes = c.pop_into(i, &mut destination_buffer);
             counter += written_bytes;
