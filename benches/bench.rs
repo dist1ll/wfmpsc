@@ -23,7 +23,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use wfmpsc::{queue, ConsumerHandle, TLQ};
+use wfmpsc::{queue, ConsumerHandle, TLQ, ThreadSafeAlloc};
 
 /// Our wfmpsc requires certain configuration parameters to be known at
 /// compile-time. This is why we define a `const` config object,
@@ -90,8 +90,9 @@ fn push_wfmpsc<
     const C: usize,
     const S: usize,
     const L: usize,
+    A: ThreadSafeAlloc
 >(
-    mut p: TLQ<T, C, S, L>,
+    mut p: TLQ<T, C, S, L, A>,
     bytes: usize,
     prod_counter: Arc<AtomicUsize>,
 ) {
