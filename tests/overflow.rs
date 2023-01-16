@@ -61,15 +61,15 @@ pub fn partial_write() {
 
 #[test]
 #[cfg(feature = "std")]
-pub fn concurrent_write() {
+pub fn concurrent_partial_write() {
     let mut handlers = vec![];
     let total_bytes = 1_000_000; // 100 times queue size
-    const prod_count: usize = 8;
+    const PROD_COUNT: usize = 8;
     let (consumer, prods) = queue!(
         bitsize: 15,
-        producers: prod_count
+        producers: PROD_COUNT
     );
-    let prod_counter = Arc::new(AtomicUsize::new(prod_count));
+    let prod_counter = Arc::new(AtomicUsize::new(PROD_COUNT));
     for p in prods.into_iter() {
         let pc = prod_counter.clone();
         let tmp = std::thread::spawn(move || {
