@@ -63,16 +63,22 @@ pub struct ConsumerHandleImpl<
     const C: usize,
     const S: usize,
     const L: usize,
+    A: ThreadSafeAlloc,
 > {
     tails: RWTails<T, C>,
     heads: [ReadOnlyHead<C>; T],
     buffer: ReadOnlyBuffer<T, S, L>,
     refcount: *const AtomicU32,
-    mpscq_ptr: *const __MPSCQ<T, C, S, L>,
+    mpscq_ptr: *const __MPSCQ<T, C, S, L, A>,
 }
 
-impl<const T: usize, const C: usize, const S: usize, const L: usize>
-    ConsumerHandle for ConsumerHandleImpl<T, C, S, L>
+impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > ConsumerHandle for ConsumerHandleImpl<T, C, S, L, A>
 {
     fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
@@ -115,24 +121,40 @@ impl<const T: usize, const C: usize, const S: usize, const L: usize>
         return T;
     }
 }
-unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
-    for ConsumerHandleImpl<T, C, S, L>
+unsafe impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > Send for ConsumerHandleImpl<T, C, S, L, A>
 {
 }
 
 /// A producer handle. Use this to push data into the MPSC queue that can be
 /// read by the consumer.
 #[derive(Debug)]
-pub struct TLQ<const T: usize, const C: usize, const S: usize, const L: usize> {
+pub struct TLQ<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+    A: ThreadSafeAlloc,
+> {
     pub head: RWHead<C>,
     pub tail: ReadOnlyTail<C>,
     pub buffer: ThreadLocalBuffer<L>,
     refcount: *const AtomicU32,
-    mpscq_ptr: *const __MPSCQ<T, C, S, L>,
+    mpscq_ptr: *const __MPSCQ<T, C, S, L, A>,
 }
 
-impl<const T: usize, const C: usize, const S: usize, const L: usize>
-    TLQ<T, C, S, L>
+impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > TLQ<T, C, S, L, A>
 {
     /// Pushes a byte slice to the buffer. Performs a partial write if
     /// the queue is full. Returns the number of bytes written to the queue.
@@ -230,8 +252,13 @@ pub fn queue_element_count<const C: usize>(
     (1 << C) - queue_leftover_capacity::<C>(h, t)
 }
 
-unsafe impl<const T: usize, const C: usize, const S: usize, const L: usize> Send
-    for TLQ<T, C, S, L>
+unsafe impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > Send for TLQ<T, C, S, L, A>
 {
 }
 
@@ -369,8 +396,13 @@ impl<const C: usize> RWHead<C> {
     }
 }
 
-impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
-    for TLQ<T, C, S, L>
+impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > Display for TLQ<T, C, S, L, A>
 {
     fn fmt(
         &self,
@@ -415,6 +447,10 @@ impl<const C: usize> Display for RWHead<C> {
 /// 3rd param: alignment of the buffer, which is the size of the TLQ
 ///            (type parameter L)
 pub type DeallocFn = fn(*mut u8, usize, usize);
+fn __dummy(ptr: *mut u8, size: usize, align: usize) {}
+
+pub trait ThreadSafeAlloc: Allocator + Clone + Send {}
+impl<T: Allocator + Clone + Send> ThreadSafeAlloc for T {}
 
 /// Array of cache-aligned queue tails
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
@@ -438,16 +474,26 @@ pub struct __MPSCQ<
     const C: usize, // bitwidth of queue size
     const S: usize, // size of entire global buffer (T * 2^C)
     const L: usize, // size of the thread-local buffer (2 ^ C)
+    A: ThreadSafeAlloc,
 > {
     buffer: [u8; S],
     tails: __Tails<T>,
     heads: [__Head; T],
     refcount: AtomicU32,
-    dealloc: Option<DeallocFn>,
+    /// SAFETY: `__MPSCQ::alloc` is only allowed to be `None` if the queue was
+    /// allocated with [`std::alloc::allocate`] or the GlobalAllocator. Use the
+    /// [`wfmpsc::queue!`] macro for creating a valid __MPSCQ object.
+    alloc: Option<A>,
 }
 
-impl<'a, const T: usize, const C: usize, const S: usize, const L: usize>
-    __MPSCQ<T, C, S, L>
+impl<
+        'a,
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > __MPSCQ<T, C, S, L, A>
 {
     pub const fn layout() -> Layout {
         let size = core::mem::size_of::<Self>();
@@ -462,12 +508,13 @@ fn prod_handle<
     const C: usize,
     const S: usize,
     const L: usize,
+    A: ThreadSafeAlloc,
 >(
-    ptr: *mut __MPSCQ<T, C, S, L>,
+    ptr: *mut __MPSCQ<T, C, S, L, A>,
     pid: u8,
-) -> TLQ<T, C, S, L> {
+) -> TLQ<T, C, S, L, A> {
     assert!((pid as usize) < T);
-    let ret = TLQ::<T, C, S, L> {
+    let ret = TLQ::<T, C, S, L, A> {
         tail: ReadOnlyTail::new(unsafe {
             addr_of_mut!((*ptr).tails.0[pid as usize])
         }),
@@ -480,7 +527,7 @@ fn prod_handle<
             }) as *mut [u8; L],
         ),
         refcount: unsafe { addr_of_mut!((*ptr).refcount) },
-        mpscq_ptr: ptr as *const __MPSCQ<T, C, S, L>,
+        mpscq_ptr: ptr as *const __MPSCQ<T, C, S, L, A>,
     };
     ret
 }
@@ -492,15 +539,16 @@ fn cons_handle<
     const C: usize,
     const S: usize,
     const L: usize,
+    A: ThreadSafeAlloc,
 >(
-    ptr: *mut __MPSCQ<T, C, S, L>,
-) -> ConsumerHandleImpl<T, C, S, L> {
+    ptr: *mut __MPSCQ<T, C, S, L, A>,
+) -> ConsumerHandleImpl<T, C, S, L, A> {
     let mut heads: [ReadOnlyHead<C>; T] = unsafe { core::mem::zeroed() };
     for i in 0..T {
         heads[i] =
             ReadOnlyHead::new(unsafe { addr_of_mut!((*ptr).heads[i].0) });
     }
-    ConsumerHandleImpl::<T, C, S, L> {
+    ConsumerHandleImpl::<T, C, S, L, A> {
         tails: RWTails::<T, C>::new(unsafe { addr_of_mut!((*ptr).tails.0) }),
         heads,
         buffer: ReadOnlyBuffer::<T, S, L>::new(unsafe {
@@ -514,10 +562,23 @@ fn cons_handle<
 /// Splits a correctly allocated __MPSCQ object into a consumer and producer
 /// array (totaling T+1 objects). These objects are internally atomically
 /// refcounted, so the resulting objects are thread safe.
-pub fn split<const T: usize, const C: usize, const S: usize, const L: usize>(
-    ptr: *mut __MPSCQ<T, C, S, L>,
-) -> (ConsumerHandleImpl<T, C, S, L>, [TLQ<T, C, S, L>; T]) {
-    let mut producers: [MaybeUninit<TLQ<T, C, S, L>>; T] =
+pub fn split<
+    const T: usize,
+    const C: usize,
+    const S: usize,
+    const L: usize,
+    A: ThreadSafeAlloc,
+>(
+    ptr: *mut __MPSCQ<T, C, S, L, A>,
+    alloc: Option<A>,
+) -> (ConsumerHandleImpl<T, C, S, L, A>, [TLQ<T, C, S, L, A>; T]) {
+    // FIXME: Check if this doesn't invoke undefined behavior
+    let alloc_ptr = unsafe { addr_of_mut!((*ptr).alloc) };
+    unsafe {
+        alloc_ptr.write(alloc);
+    }
+
+    let mut producers: [MaybeUninit<TLQ<T, C, S, L, A>>; T] =
         unsafe { MaybeUninit::uninit().assume_init() };
     for (i, p) in producers.iter_mut().enumerate() {
         p.write(prod_handle(ptr, i as u8));
@@ -546,8 +607,9 @@ fn zero_heads_and_tails<
     const C: usize,
     const S: usize,
     const L: usize,
+    A: ThreadSafeAlloc,
 >(
-    ptr: *mut __MPSCQ<T, C, S, L>,
+    ptr: *mut __MPSCQ<T, C, S, L, A>,
 ) {
     for i in 0..T {
         // because tails are atomic, we are allowed to create a shared reference
@@ -560,15 +622,25 @@ fn zero_heads_and_tails<
 }
 /* create_aligned! end */
 
-impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop
-    for ConsumerHandleImpl<T, C, S, L>
+impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > Drop for ConsumerHandleImpl<T, C, S, L, A>
 {
     fn drop(&mut self) {
         drop_handle(unsafe { &*self.refcount }, self.mpscq_ptr);
     }
 }
-impl<const T: usize, const C: usize, const S: usize, const L: usize> Drop
-    for TLQ<T, C, S, L>
+impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > Drop for TLQ<T, C, S, L, A>
 {
     fn drop(&mut self) {
         // sound because we obtained our refcount from a valid shared reference
@@ -583,9 +655,10 @@ fn drop_handle<
     const C: usize,
     const S: usize,
     const L: usize,
+    A: ThreadSafeAlloc,
 >(
     refcount: &AtomicU32,
-    mpscq_ptr: *const __MPSCQ<T, C, S, L>,
+    mpscq_ptr: *const __MPSCQ<T, C, S, L, A>,
 ) {
     // See: std::sync::Arc source code. Release + Acquire
     if refcount.fetch_sub(1, Ordering::Release) != 1 {
@@ -593,26 +666,59 @@ fn drop_handle<
     }
     refcount.load(Ordering::Acquire);
 
-    let layout = __MPSCQ::<T, C, S, L>::layout();
-    #[cfg(not(feature = "std"))]
-    {
-        let f = unsafe { addr_of!((*mpscq_ptr).dealloc.unwrap()) };
-        f(ptr, layout.size, layout.align);
-    }
-    #[cfg(feature = "std")]
-    {
-        let ptr = mpscq_ptr as *const u8 as *mut u8;
-        unsafe {
-            std::alloc::dealloc(ptr, layout);
+    // information for deallocation
+    let ptr = mpscq_ptr as *const u8 as *mut u8;
+    let layout = __MPSCQ::<T, C, S, L, A>::layout();
+
+    // SAFETY: Since the queue is refcounted, we know that no other thread
+    // has a mutable reference of it. Any operation from this point may be
+    // considered single-threaded.
+    let mpscq_ref = unsafe { &mut *(mpscq_ptr as *mut __MPSCQ<T, C, S, L, A>) };
+    let custom_dealloc = mpscq_ref.alloc.take();
+    match custom_dealloc {
+        None => {
+            #[cfg(not(feature = "std"))]
+            {
+                panic!(
+                    "no deallocation function specified for mpsc queue! 
+                    This object was illegally constructed"
+                );
+            }
+            #[cfg(feature = "std")]
+            {
+                // SAFETY: The object was created with alloc, and with the same
+                // alignment. Also, this object is a POD with the exception of
+                // the custom allocator. But since that allocator is None, we 
+                // have no managed resources or fields with custom destructors.
+                // Hence, we can safely deallocate this object.
+                unsafe {
+                    std::alloc::dealloc(ptr, layout);
+                }
+            }
         }
-    }
+        Some(f) => {
+            drop(mpscq_ref);
+            // We are allowed to dealloc with the cloned allocator. 
+            // From [`Allocator`] docs:
+            //   "A cloned allocator must behave like the same allocator."
+            let cloned_alloc = f.clone();
+            drop(f);
+            // SAFETY: We already dropped the custom allocator, making the
+            // rest of the queue a POD that can be freed. 
+            unsafe {
+                cloned_alloc.deallocate(NonNull::new_unchecked(ptr), layout);
+            }
+        }
+    };
 }
-/*
 
-*/
-
-impl<const T: usize, const C: usize, const S: usize, const L: usize> Display
-    for __MPSCQ<T, C, S, L>
+impl<
+        const T: usize,
+        const C: usize,
+        const S: usize,
+        const L: usize,
+        A: ThreadSafeAlloc,
+    > Display for __MPSCQ<T, C, S, L, A>
 {
     fn fmt(
         &self,
@@ -641,17 +747,28 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         use core::alloc::Layout;
-        let layout =
-            wfmpsc::__MPSCQ::<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout(
-            );
+
+        let layout = wfmpsc::__MPSCQ::<
+            $p,
+            $b,
+            { (1 << $b) * $p },
+            { 1 << $b },
+            std::alloc::Global,
+        >::layout();
         let queue = unsafe {
             // SAFETY: Turning any uninitialized memory into a value type is UB.
             // In this queue, we make sure that any read was preceded by a store
             // for every memory location.
             std::alloc::alloc(layout)
-                as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
+                as *mut wfmpsc::__MPSCQ<
+                    $p,
+                    $b,
+                    { (1 << $b) * $p },
+                    { 1 << $b },
+                    std::alloc::Global,
+                >
         };
-        wfmpsc::split(queue)
+        wfmpsc::split(queue, None)
     }};
 }
 
@@ -669,18 +786,28 @@ macro_rules! queue_alloc {
     (
         bitsize: $b:expr,
         producers: $p:expr,
-        allocator: $alloc:expr
+        alloc: $alloc:ty, $($args:ident),* $(,)?
     ) => {{
         use core::alloc::{Allocator, Layout};
-        let layout =
-            wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>::layout();
+        let alloc = <$alloc>::new($($args)*);
+        let layout = wfmpsc::__MPSCQ::<
+            $p,
+            $b,
+            { (1 << $b) * $p },
+            { 1 << $b },
+            $alloc,
+        >::layout();
         let queue = unsafe {
-            $alloc.allocate(layout).unwrap().as_ptr()
-                as *mut wfmpsc::__MPSCQ<$p, $b, { (1 << $b) * $p }, { 1 << $b }>
+            alloc.allocate(layout).unwrap().as_ptr()
+                as *mut wfmpsc::__MPSCQ<
+                    $p,
+                    $b,
+                    { (1 << $b) * $p },
+                    { 1 << $b },
+                    $alloc,
+                >
         };
-        let q_ref = unsafe { queue.as_mut().unwrap() };
-        q_ref.zero_heads_and_tails();
-        q_ref.split()
+        wfmpsc::split(queue, Some(alloc))
     }};
 }
 

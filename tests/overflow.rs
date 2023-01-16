@@ -4,23 +4,49 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+#![feature(allocator_api)]
+
+mod util;
+
 use std::{
     hint::black_box,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU32, AtomicUsize, Ordering},
         Arc,
     },
 };
 
-use wfmpsc::{queue, ConsumerHandle, TLQ};
+use wfmpsc::{queue, ConsumerHandle, ThreadSafeAlloc, TLQ};
+
+extern crate alloc;
+
+use util::MockAllocator;
 
 /**!
 This test checks if indexing is correctly implemented for overlapping concurrent
 push and pop operations.
 */
 
+/// Check if custom deallocator is called.
+#[test]
+pub fn custom_dealloc() {
+    // alloc can't outlive mpsc!!!
+    let counter = std::sync::Arc::new(AtomicU32::new(0));
+    let cc = counter.clone();
+    let (rx, tx) = wfmpsc::queue_alloc!(
+        bitsize: 4,
+        producers: 5,
+        alloc: MockAllocator, cc,
+    );
+    assert!(counter.load(Ordering::Acquire) == 1);
+    drop(rx);
+    drop(tx);
+    assert!(counter.load(Ordering::Acquire) == 0);
+}
+
 /// Check if partial writes are executed correctly on the buffer.
 #[test]
+#[cfg(feature = "std")]
 pub fn partial_write() {
     let (cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 1);
     // push more than 15 bytes into the queue
@@ -34,6 +60,7 @@ pub fn partial_write() {
 }
 
 #[test]
+#[cfg(feature = "std")]
 pub fn concurrent_write() {
     let mut handlers = vec![];
     let total_bytes = 1_000_000; // 100 times queue size
@@ -61,8 +88,9 @@ fn push_wfmpsc<
     const C: usize,
     const S: usize,
     const L: usize,
+    A: ThreadSafeAlloc,
 >(
-    mut p: TLQ<T, C, S, L>,
+    mut p: TLQ<T, C, S, L, A>,
     bytes: usize,
     chunk_size: usize,
     pc: Arc<AtomicUsize>,
@@ -88,7 +116,6 @@ fn pop_wfmpsc(c: impl ConsumerHandle, pc: Arc<AtomicUsize>) {
             let written_bytes = c.pop_into(i, &mut destination_buffer);
             counter += written_bytes;
         }
-        println!("{}", counter);
     }
     black_box(counter);
 }
