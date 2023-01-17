@@ -34,7 +34,7 @@ parameters are explained in the following.
 | variable | meaning |
 |----------|---------|
 | `cache_line` | The alignment of the queue indices (should be either 0 or your cache line size) |
-| `queue_size` | `queue capacity = 2 ^ queue_size` |
+| `queue_size` | `queue capacity = 2 ^ queue_size`, should be <= 16 currently because of `u16` indices|
 | `prod`  | Number of concurrent producers |
 | `dummy` | Number of dummy instructions inserted between every push to reduce contention |
 | `chunk_size` | Number of bytes submitted in every push operation by consumers |
