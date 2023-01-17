@@ -11,7 +11,7 @@ pub struct MockAllocator {
 }
 
 impl MockAllocator {
-    pub fn new(counter: alloc::sync::Arc<AtomicU32>) -> Self {
+    pub fn new(counter: std::sync::Arc<AtomicU32>) -> Self {
         MockAllocator {
             alloc: Global {},
             counter,

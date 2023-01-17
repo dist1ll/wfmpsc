@@ -7,7 +7,6 @@
 #![feature(allocator_api)]
 
 mod util;
-
 use std::{
     hint::black_box,
     sync::{
@@ -15,12 +14,8 @@ use std::{
         Arc,
     },
 };
-
-use wfmpsc::{queue, ConsumerHandle, ThreadSafeAlloc, TLQ};
-
-extern crate alloc;
-
 use util::MockAllocator;
+use wfmpsc::{queue, ConsumerHandle, ThreadSafeAlloc, TLQ};
 
 /**!
 This test checks if indexing is correctly implemented for overlapping concurrent
@@ -46,7 +41,6 @@ pub fn custom_dealloc() {
 
 /// Check if partial writes are executed correctly on the buffer.
 #[test]
-#[cfg(feature = "std")]
 pub fn partial_write() {
     let (cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 1);
     // push more than 15 bytes into the queue
@@ -60,7 +54,9 @@ pub fn partial_write() {
 }
 
 #[test]
-#[cfg(feature = "std")]
+pub fn concurrent_complete_write() {}
+
+#[test]
 pub fn concurrent_partial_write() {
     let mut handlers = vec![];
     let total_bytes = 1_000_000; // 100 times queue size

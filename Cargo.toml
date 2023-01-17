@@ -9,14 +9,14 @@ edition = "2021"
 resolver = "2"
 
 [features]
-std = []
+alloc = []
 
 [dependencies]
 
 [dev-dependencies]
 # workaround for lack of test-specific features
 # https://github.com/rust-lang/cargo/issues/2911#issuecomment-749580481
-wfmpsc = { path = ".", features = ["std"] }
+wfmpsc = { path = ".", features = ["alloc"] }
 criterion = "0.4"
 core_affinity = "0.7.6"
 

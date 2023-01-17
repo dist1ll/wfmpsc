@@ -4,6 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
+#![no_std]
 #![feature(allocator_api)]
 
 use core::fmt::Debug;
@@ -18,6 +19,9 @@ use core::{
     alloc::{AllocError, Allocator, Layout},
     ptr::NonNull,
 };
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
 /* Aliases for queue's atomic integer type */
 /// Compressed tail index
@@ -406,8 +410,8 @@ impl<
 {
     fn fmt(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> Result<(), std::fmt::Error> {
+        f: &mut core::fmt::Formatter<'_>,
+    ) -> Result<(), core::fmt::Error> {
         write!(
             f,
             "Head(val): {}\nHead(addr): 0x{:x}\nBuffer: {}",
@@ -419,8 +423,8 @@ impl<
 impl<const L: usize> Display for ThreadLocalBuffer<L> {
     fn fmt(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> Result<(), std::fmt::Error> {
+        f: &mut core::fmt::Formatter<'_>,
+    ) -> Result<(), core::fmt::Error> {
         unsafe {
             let arr = *self.0;
             write!(f, "[ ")?;
@@ -435,8 +439,8 @@ impl<const L: usize> Display for ThreadLocalBuffer<L> {
 impl<const C: usize> Display for RWHead<C> {
     fn fmt(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> Result<(), std::fmt::Error> {
+        f: &mut core::fmt::Formatter<'_>,
+    ) -> Result<(), core::fmt::Error> {
         unsafe { write!(f, "{:?}", *self.0) }
     }
 }
@@ -677,34 +681,31 @@ fn drop_handle<
     let custom_dealloc = mpscq_ref.alloc.take();
     match custom_dealloc {
         None => {
-            #[cfg(not(feature = "std"))]
+            #[cfg(not(feature = "alloc"))]
             {
-                panic!(
-                    "no deallocation function specified for mpsc queue! 
-                    This object was illegally constructed"
-                );
+                panic!("no custom allocator found!");
             }
-            #[cfg(feature = "std")]
+            #[cfg(feature = "alloc")]
             {
                 // SAFETY: The object was created with alloc, and with the same
                 // alignment. Also, this object is a POD with the exception of
-                // the custom allocator. But since that allocator is None, we 
+                // the custom allocator. But since that allocator is None, we
                 // have no managed resources or fields with custom destructors.
                 // Hence, we can safely deallocate this object.
                 unsafe {
-                    std::alloc::dealloc(ptr, layout);
+                    alloc::alloc::dealloc(ptr, layout);
                 }
             }
         }
         Some(f) => {
             drop(mpscq_ref);
-            // We are allowed to dealloc with the cloned allocator. 
+            // We are allowed to dealloc with the cloned allocator.
             // From [`Allocator`] docs:
             //   "A cloned allocator must behave like the same allocator."
             let cloned_alloc = f.clone();
             drop(f);
             // SAFETY: We already dropped the custom allocator, making the
-            // rest of the queue a POD that can be freed. 
+            // rest of the queue a POD that can be freed.
             unsafe {
                 cloned_alloc.deallocate(NonNull::new_unchecked(ptr), layout);
             }
@@ -722,8 +723,8 @@ impl<
 {
     fn fmt(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> Result<(), std::fmt::Error> {
+        f: &mut core::fmt::Formatter<'_>,
+    ) -> Result<(), core::fmt::Error> {
         write!(f, "heads: ")?;
         for (idx, h) in self.heads.iter().enumerate() {
             write!(f, "[#{}: {}] ", idx, h.0.load(Ordering::Relaxed))?;
@@ -741,25 +742,25 @@ impl<
 ///
 /// If you want to use a custom allocator, use [`queue_alloc!`].
 #[macro_export]
+#[cfg(feature = "alloc")]
 macro_rules! queue {
     (
         bitsize: $b:expr,
         producers: $p:expr
     ) => {{
-        use core::alloc::Layout;
-
+        extern crate alloc;
         let layout = wfmpsc::__MPSCQ::<
             $p,
             $b,
             { (1 << $b) * $p },
             { 1 << $b },
-            std::alloc::Global,
+            alloc::alloc::Global,
         >::layout();
         let queue = unsafe {
             // SAFETY: Turning any uninitialized memory into a value type is UB.
             // In this queue, we make sure that any read was preceded by a store
             // for every memory location.
-            std::alloc::alloc(layout)
+            alloc::alloc::alloc(layout)
                 as *mut wfmpsc::__MPSCQ<
                     $p,
                     $b,
