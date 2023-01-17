@@ -25,16 +25,23 @@ def extract_time(s: str):
         x = x / 1_000_000
     return x
 
-def run_bench(env, target, cfg):
+def run_bench(env, cfg):
     print(f'[x] compiling w/ {prod} threads, {queue_size}-bit width,' + 
         f' {dummy} dummies, {chunk_size}B chunks')
     # current_sub = sub.Popen('cat ../report.txt', # quick testing
-    current_sub = sub.Popen(f'cargo rustc --release --bench bench -- {cfg}',
+    current_sub = sub.Popen(f'cargo rustc --release --bench bench -- {cfg} -Awarnings',
         shell = True,
         stderr = sub.DEVNULL,
         stdout = sub.DEVNULL,
         env = env)
     current_sub.wait()
+
+    rootdir = "../target/release/deps/"
+    target = ''
+    for root, dirs, files in os.walk(rootdir):
+      for file in files:
+        if "bench-" in file and ".d" not in file: 
+            target = rootdir[3:] + file    
     print(f'  > Running benchmark', end='', flush=True)
     # current_sub = sub.Popen('cat ../report.txt', # quick testing
     current_sub = sub.Popen(f'./{target} --bench',
@@ -60,25 +67,17 @@ def run_bench(env, target, cfg):
 _env = os.environ.copy()
 max_prods = os.cpu_count() - 1
 
-rootdir = "../target/release/deps/"
-target = ''
-for root, dirs, files in os.walk(rootdir):
-  for file in files:
-    if "bench-" in file and ".d" not in file: 
-        target = rootdir + file
-
-print(f'Running {target} suite. Can take a long time')
 for cache_line in [0, 128]:
     print(f'[x] compiling {cache_line}-bit cache config (may take a while)')
-    for queue_size in [8, 16, 24]:
-        for prod in [1, 2, 4, 9]: # change this per machine
-            for dummy in [0, 50, 500]:
+    for queue_size in [16]:
+        for prod in [1, 2, 5, 9]: # change this per machine
+            for dummy in [0]:
                 for chunk_size in [2]:
-                    cfg = f'--cfg cache_line="{cache_line}"'
+                    cfg = f'--cfg "cache_line=\\"{cache_line}\\""'
                     _env["WFMPSC_BENCH_PRODUCER_COUNT"] = str(prod)
                     _env["WFMPSC_BENCH_QUEUE_SIZE"] = str(queue_size)
                     _env["WFMPSC_BENCH_DUMMY_INSTRUCTIONS"] = str(dummy)
                     _env["WFMPSC_BENCH_CHUNK_SIZE"] = str(chunk_size)
-                    run_bench(_env, target[1:], cfg)
+                    run_bench(_env, cfg)
 
 # print('    > result: ' + result + 'ms')
