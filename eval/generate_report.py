@@ -70,7 +70,7 @@ max_prods = os.cpu_count() - 1
 for cache_line in [0, 128]:
     print(f'[x] compiling {cache_line}-bit cache config (may take a while)')
     for queue_size in [15]:
-        for prod in [2, 9]: # change this per machine
+        for prod in [1, 3, 5, 9]: # change this per machine
             for dummy in [0, 500]:
                 for chunk_size in [1]:
                     cfg = f'--cfg cache_line=\\"{cache_line}\\"'
