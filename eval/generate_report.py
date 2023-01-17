@@ -29,7 +29,7 @@ def run_bench(env, cfg):
     print(f'[x] compiling w/ {prod} threads, {queue_size}-bit width,' + 
         f' {dummy} dummies, {chunk_size}B chunks')
     # current_sub = sub.Popen('cat ../report.txt', # quick testing
-    current_sub = sub.Popen(f'cargo rustc --release --bench bench -- {cfg} -Awarnings',
+    current_sub = sub.Popen(f'RUSTFLAGS="{cfg}" cargo rustc --release --bench bench',
         shell = True,
         stderr = sub.DEVNULL,
         stdout = sub.DEVNULL,
@@ -69,11 +69,11 @@ max_prods = os.cpu_count() - 1
 
 for cache_line in [0, 128]:
     print(f'[x] compiling {cache_line}-bit cache config (may take a while)')
-    for queue_size in [16]:
-        for prod in [1, 2, 5, 9]: # change this per machine
-            for dummy in [0]:
-                for chunk_size in [2]:
-                    cfg = f'--cfg "cache_line=\\"{cache_line}\\""'
+    for queue_size in [15]:
+        for prod in [2, 9]: # change this per machine
+            for dummy in [0, 500]:
+                for chunk_size in [1]:
+                    cfg = f'--cfg cache_line=\\"{cache_line}\\"'
                     _env["WFMPSC_BENCH_PRODUCER_COUNT"] = str(prod)
                     _env["WFMPSC_BENCH_QUEUE_SIZE"] = str(queue_size)
                     _env["WFMPSC_BENCH_DUMMY_INSTRUCTIONS"] = str(dummy)
