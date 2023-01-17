@@ -17,13 +17,14 @@ use cfg::{cfg_from_env, BenchCfg};
 
 use std::{
     hint::black_box,
+    mem::size_of,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
 };
-use wfmpsc::{queue, ConsumerHandle, TLQ, ThreadSafeAlloc};
+use wfmpsc::{queue, ConsumerHandle, ThreadSafeAlloc, TLQ};
 
 /// Our wfmpsc requires certain configuration parameters to be known at
 /// compile-time. This is why we define a `const` config object,
@@ -90,7 +91,7 @@ fn push_wfmpsc<
     const C: usize,
     const S: usize,
     const L: usize,
-    A: ThreadSafeAlloc
+    A: ThreadSafeAlloc,
 >(
     mut p: TLQ<T, C, S, L, A>,
     bytes: usize,

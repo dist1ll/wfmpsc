@@ -27,9 +27,9 @@ extern crate alloc;
 /// Compressed tail index
 type utail = u16;
 /// Canocial size of indices (i.e. precise addressing of memory)
-type udefault = u32;
+type udefault = u16;
 type AtomicTail = AtomicU16;
-type AtomicHead = AtomicU32;
+type AtomicHead = AtomicU16;
 
 #[inline(always)]
 pub const fn compress(tail: udefault, queue_bitwidth: usize) -> utail {
