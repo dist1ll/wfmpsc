@@ -32,7 +32,7 @@ pub fn custom_dealloc() {
         bitsize: 4,
         producers: 5,
         alloc: MockAllocator, cc,
-    );
+    ).unwrap();
     assert!(counter.load(Ordering::Acquire) == 1);
     drop(rx);
     drop(tx);

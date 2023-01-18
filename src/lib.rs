@@ -500,6 +500,33 @@ impl<
         A: ThreadSafeAlloc,
     > __MPSCQ<T, C, S, L, A>
 {
+    pub fn split_view_with_allocator(
+        alloc: A,
+    ) -> Result<
+        (ConsumerHandleImpl<T, C, S, L, A>, [TLQ<T, C, S, L, A>; T]),
+        AllocError,
+    > {
+        let layout = Self::layout();
+        // SAFETY: Turning any uninitialized memory into a value type is UB.
+        // In this queue, we make sure that any read was preceded by a store
+        // for every memory location. This way we don't have to zero the buffer.
+        let queue = alloc.allocate(layout)?.as_ptr() as *mut Self;
+        Ok(split(queue, Some(alloc)))
+    }
+    #[cfg(feature = "alloc")]
+    /// Create a new queue with the default allocator via `alloc` extern crate.
+    pub fn split_view_default(
+    ) -> (ConsumerHandleImpl<T, C, S, L, A>, [TLQ<T, C, S, L, A>; T]) {
+        extern crate alloc;
+        let layout = Self::layout();
+        let queue = unsafe {
+            // SAFETY: Turning any uninitialized memory into a value type is UB.
+            // In this queue, we make sure that any read was preceded by a store
+            // for every memory location.
+            alloc::alloc::alloc(layout) as *mut Self
+        };
+        split(queue, None)
+    }
     pub const fn layout() -> Layout {
         let size = core::mem::size_of::<Self>();
         let align = core::mem::align_of::<Self>();
@@ -573,7 +600,7 @@ fn cons_handle<
 /// Splits a correctly allocated __MPSCQ object into a consumer and producer
 /// array (totaling T+1 objects). These objects are internally atomically
 /// refcounted, so the resulting objects are thread safe.
-pub fn split<
+fn split<
     const T: usize,
     const C: usize,
     const S: usize,
@@ -737,6 +764,7 @@ impl<
     }
 }
 
+pub fn create_queue() {}
 /// Creates an MPSC queue using the standard allocator.
 ///
 /// Parameters:
@@ -753,27 +781,13 @@ macro_rules! queue {
         producers: $p:expr
     ) => {{
         extern crate alloc;
-        let layout = wfmpsc::__MPSCQ::<
+        wfmpsc::__MPSCQ::<
             $p,
             $b,
             { (1 << $b) * $p },
             { 1 << $b },
             alloc::alloc::Global,
-        >::layout();
-        let queue = unsafe {
-            // SAFETY: Turning any uninitialized memory into a value type is UB.
-            // In this queue, we make sure that any read was preceded by a store
-            // for every memory location.
-            alloc::alloc::alloc(layout)
-                as *mut wfmpsc::__MPSCQ<
-                    $p,
-                    $b,
-                    { (1 << $b) * $p },
-                    { 1 << $b },
-                    std::alloc::Global,
-                >
-        };
-        wfmpsc::split(queue, None)
+        >::split_view_default()
     }};
 }
 
@@ -795,24 +809,13 @@ macro_rules! queue_alloc {
     ) => {{
         use core::alloc::{Allocator, Layout};
         let alloc = <$alloc>::new($($args)*);
-        let layout = wfmpsc::__MPSCQ::<
+        wfmpsc::__MPSCQ::<
             $p,
             $b,
             { (1 << $b) * $p },
             { 1 << $b },
             $alloc,
-        >::layout();
-        let queue = unsafe {
-            alloc.allocate(layout).unwrap().as_ptr()
-                as *mut wfmpsc::__MPSCQ<
-                    $p,
-                    $b,
-                    { (1 << $b) * $p },
-                    { 1 << $b },
-                    $alloc,
-                >
-        };
-        wfmpsc::split(queue, Some(alloc))
+        >::split_view_with_allocator(alloc)
     }};
 }
 
