@@ -25,7 +25,7 @@ push and pop operations.
 #[test]
 #[should_panic]
 pub fn pid_overflow() {
-    let (rx, tx) = wfmpsc::queue!(bitsize: 4, producers: 1);
+    let (tx, rx) = wfmpsc::queue!(bitsize: 4, producers: 1);
     tx[0].push("".as_bytes());
     let mut x = [0u8;12];
     rx.pop_into(100, &mut x);
@@ -36,7 +36,7 @@ pub fn custom_dealloc() {
     // alloc can't outlive mpsc!!!
     let counter = std::sync::Arc::new(AtomicU32::new(0));
     let cc = counter.clone();
-    let (rx, tx) = wfmpsc::queue_alloc!(
+    let (tx, rx) = wfmpsc::queue_alloc!(
         bitsize: 4,
         producers: 5,
         alloc: MockAllocator, cc,
@@ -51,14 +51,14 @@ pub fn custom_dealloc() {
 /// Check if partial writes are executed correctly on the buffer.
 #[test]
 pub fn partial_write() {
-    let (cons, prod) = wfmpsc::queue!(bitsize: 4, producers: 1);
+    let (tx, rx) = wfmpsc::queue!(bitsize: 4, producers: 1);
     // push more than 15 bytes into the queue
-    prod[0].push("Hello World, how are you doing".as_bytes());
+    tx[0].push("Hello World, how are you doing".as_bytes());
     //                           ^
     //                     the 'w' is the 16th letter
 
     let mut dst = [0u8; 15];
-    cons.pop_into(0, &mut dst);
+    rx.pop_into(0, &mut dst);
     assert_eq!("Hello World, ho", conv(&dst));
 }
 
@@ -70,19 +70,19 @@ pub fn concurrent_partial_write() {
     let mut handlers = vec![];
     let total_bytes = 1_000_000; // 100 times queue size
     const PROD_COUNT: usize = 8;
-    let (consumer, prods) = queue!(
+    let (tx, rx) = queue!(
         bitsize: 15,
         producers: PROD_COUNT
     );
     let prod_counter = Arc::new(AtomicUsize::new(PROD_COUNT));
-    for p in prods.into_iter() {
+    for p in tx.into_iter() {
         let pc = prod_counter.clone();
         let tmp = std::thread::spawn(move || {
             push_wfmpsc(p, total_bytes, 105, pc);
         });
         handlers.push(tmp);
     }
-    pop_wfmpsc(consumer, prod_counter);
+    pop_wfmpsc(rx, prod_counter);
     for h in handlers {
         h.join().expect("Joining thread");
     }

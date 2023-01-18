@@ -514,7 +514,7 @@ impl<
     pub fn split_view_with_allocator(
         alloc: A,
     ) -> Result<
-        (ConsumerHandleImpl<T, C, S, L, A>, [TLQ<T, C, S, L, A>; T]),
+        ([TLQ<T, C, S, L, A>; T], ConsumerHandleImpl<T, C, S, L, A>),
         AllocError,
     > {
         let layout = Self::layout();
@@ -527,7 +527,7 @@ impl<
     #[cfg(feature = "alloc")]
     /// Create a new queue with the default allocator via `alloc` extern crate.
     pub fn split_view_default(
-    ) -> (ConsumerHandleImpl<T, C, S, L, A>, [TLQ<T, C, S, L, A>; T]) {
+    ) -> ([TLQ<T, C, S, L, A>; T], ConsumerHandleImpl<T, C, S, L, A>) {
         extern crate alloc;
         let layout = Self::layout();
         let queue = unsafe {
@@ -620,7 +620,7 @@ fn split<
 >(
     ptr: *mut __MPSCQ<T, C, S, L, A>,
     alloc: Option<A>,
-) -> (ConsumerHandleImpl<T, C, S, L, A>, [TLQ<T, C, S, L, A>; T]) {
+) -> ([TLQ<T, C, S, L, A>; T], ConsumerHandleImpl<T, C, S, L, A>) {
     let alloc_ptr = unsafe { addr_of_mut!((*ptr).alloc) };
     unsafe {
         alloc_ptr.write(alloc);
@@ -647,7 +647,7 @@ fn split<
     // Because of this, heads and tails MUST be initialized before being
     // released to safe rust-land.
     zero_heads_and_tails(ptr);
-    (cons_handle(ptr), producers)
+    (producers, cons_handle(ptr))
 }
 
 fn zero_heads_and_tails<

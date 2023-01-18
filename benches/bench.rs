@@ -57,12 +57,12 @@ fn wfmpsc_bench_iteration() -> Duration {
     let mut handlers = vec![];
     let prod_counter = Arc::new(AtomicUsize::new(0));
     let total_bytes = 1_000_000 / CFG.producer_count; //2Mb
-    let (consumer, prods) = queue!(
+    let (tx, rx) = queue!(
         bitsize: { CFG.queue_size },
         producers: { CFG.producer_count }
     );
     core_affinity::set_for_current(CoreId { id: 0 });
-    for (idx, p) in prods.into_iter().enumerate() {
+    for (idx, p) in tx.into_iter().enumerate() {
         let pc = prod_counter.clone();
         let tmp = std::thread::spawn(move || {
             core_affinity::set_for_current(CoreId { id: idx + 1 });
@@ -75,7 +75,7 @@ fn wfmpsc_bench_iteration() -> Duration {
     // -----------------------------------
     // start measuring
     prod_counter.store(CFG.producer_count, Ordering::Release);
-    pop_wfmpsc(consumer, prod_counter);
+    pop_wfmpsc(rx, prod_counter);
     // stop measuring
     // -----------------------------------
     let result = start.elapsed();
