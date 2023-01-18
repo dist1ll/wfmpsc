@@ -89,7 +89,16 @@ impl<
     > ConsumerHandle for ConsumerHandleImpl<T, C, S, L, A>
 {
     fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize {
-        let tail = self.tails.read_atomic(pid, Ordering::Relaxed);
+        // SAFETY: As long as `pid` is smaller than the producer count, we
+        // can perform array access with pid.
+        assert!(
+            pid < T,
+            "producer ID needs to be smaller than the producer count"
+        );
+
+        // SAFETY: We fulfilled the pid < T invariant
+        let tail = unsafe { self.tails.read_atomic(pid, Ordering::Relaxed) };
+
         // FIXME: Understand why relaxed causes a data race in miri.
         // Isn't there a data dependence between this head and the
         // first memcpy below? Why do we need to synchronize here?
@@ -104,23 +113,29 @@ impl<
             (self.buffer.tlq_base_ptr(pid) as usize + tail as usize) as *mut u8;
 
         if target_wrap >= tail {
+            // SAFETY: in this branch, (src + len) will always be <= maximum
+            // address of the tlq.
             unsafe {
                 copy_nonoverlapping(src, dst.as_mut_ptr(), len);
             }
         } else {
             let split_len = L - tail as usize;
+            // SAFETY: A splitting pop requires two copies from the ring buffer.
+            // Both copies stay within the TLQ and push bytes to the dst.
+            // We make sure that the total bytes copied need to be <= dst.len()
             unsafe {
                 copy_nonoverlapping(src, dst.as_mut_ptr(), split_len);
                 copy_nonoverlapping(
                     self.buffer.tlq_base_ptr(pid),
-                    // this is guaranteed to work because we made sure that
-                    // the total number of items copied is min(elems, dst.len)
                     (dst.as_mut_ptr() as usize + split_len) as *mut _,
                     len - split_len,
                 );
             }
         }
-        self.tails.store_atomic(pid, target_wrap, Ordering::Release);
+        // SAFETY: We fulfilled the pid < T invariant
+        unsafe {
+            self.tails.store_atomic(pid, target_wrap, Ordering::Release);
+        }
         len
     }
 
@@ -280,36 +295,34 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-pub struct RWTails<const T: usize, const C: usize>(*const [AtomicTail; T]);
+struct RWTails<const T: usize, const C: usize>(*const [AtomicTail; T]);
 impl<const T: usize, const C: usize> RWTails<T, C> {
     pub fn new(ptr: *const [AtomicTail; T]) -> Self {
         Self(ptr)
     }
+    /// Safety invariant: pid < T
     #[inline(always)]
-    pub fn read_atomic(&self, pid: usize, ord: Ordering) -> udefault {
-        // TODO: Check that pointer arithmetics don't outperform this
-        unsafe {
-            let base_addr = self.0 as *mut AtomicTail as usize;
-            let pid_pointer =
-                base_addr + pid * core::mem::size_of::<AtomicTail>();
-            let atomic = &*(pid_pointer as *const AtomicTail);
-            let l = atomic.load(ord);
-            decompress(l, C)
-        }
+    unsafe fn read_atomic(&self, pid: usize, ord: Ordering) -> udefault {
+        debug_assert!(pid < T);
+        let base_addr = self.0 as *mut AtomicTail as usize;
+        let pid_pointer = base_addr + pid * core::mem::size_of::<AtomicTail>();
+        // PROVENANCE: Atomic variables can always be cast into a shared reference
+        let atomic = &*(pid_pointer as *const AtomicTail);
+        let l = atomic.load(ord);
+        decompress(l, C)
     }
     /// Increment the tail atomically using release semantics.
     /// Automatically compresses the tail into the right size.
+    /// Safety invariant: pid < T
     #[inline(always)]
-    pub fn store_atomic(&self, pid: usize, val: udefault, ord: Ordering) {
+    unsafe fn store_atomic(&self, pid: usize, val: udefault, ord: Ordering) {
+        debug_assert!(pid < T);
         let val = compress(val, C);
         // NOTE: We don't need CAS or LL/SC because we are the only thread
         // that's performing STORE operations on this memory address.
-        unsafe {
-            // Bitmask wrap increment, using bitwidth of queue C
-            let atomic = &*((self.0 as usize + pid * size_of::<AtomicTail>())
-                as *mut AtomicTail);
-            atomic.store(val, ord);
-        }
+        let atomic: &AtomicTail =
+            &*((self.0 as usize + pid * size_of::<AtomicTail>()) as *mut _);
+        atomic.store(val, ord);
     }
 }
 
@@ -364,10 +377,8 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     /// the specified producer id.
     #[inline(always)]
     pub fn tlq_base_ptr(&self, pid: usize) -> *mut u8 {
-        debug_assert!(
-            pid < T,
-            "this queue has {T} producers, but you selected a too large pid={pid}",
-        );
+        debug_assert!(pid < T,
+        "this queue has {T} producers, but you selected a too large pid={pid}");
         // TODO: Check for assembly optimizations here
         (self.0 as usize + pid * L) as *mut u8
     }

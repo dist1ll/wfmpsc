@@ -22,6 +22,14 @@ This test checks if indexing is correctly implemented for overlapping concurrent
 push and pop operations.
 */
 
+#[test]
+#[should_panic]
+pub fn pid_overflow() {
+    let (rx, tx) = wfmpsc::queue!(bitsize: 4, producers: 1);
+    tx[0].push("".as_bytes());
+    let mut x = [0u8;12];
+    rx.pop_into(100, &mut x);
+}
 /// Check if custom deallocator is called.
 #[test]
 pub fn custom_dealloc() {
@@ -32,7 +40,8 @@ pub fn custom_dealloc() {
         bitsize: 4,
         producers: 5,
         alloc: MockAllocator, cc,
-    ).unwrap();
+    )
+    .unwrap();
     assert!(counter.load(Ordering::Acquire) == 1);
     drop(rx);
     drop(tx);
