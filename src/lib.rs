@@ -8,10 +8,7 @@
 #![feature(allocator_api)]
 
 use core::fmt::Debug;
-use core::{
-    fmt::Display,
-    sync::atomic::{AtomicU16, AtomicU32, Ordering},
-};
+use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 
 use core::mem::{size_of, MaybeUninit};
 use core::ptr::{addr_of, addr_of_mut, copy_nonoverlapping};
@@ -55,6 +52,9 @@ pub const fn chunk_width(queue_bitwidth: usize) -> usize {
     queue_bitwidth - 16
 }
 
+pub trait ThreadSafeAlloc: Allocator + Clone + Send {}
+impl<T: Allocator + Clone + Send> ThreadSafeAlloc for T {}
+
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
     /// Returns the number of producers
@@ -95,17 +95,14 @@ impl<
             pid < T,
             "producer ID needs to be smaller than the producer count"
         );
-
         // SAFETY: We fulfilled the pid < T invariant
         let tail = unsafe { self.tails.read_atomic(pid, Ordering::Relaxed) };
-
         // FIXME: Understand why relaxed causes a data race in miri.
         // Isn't there a data dependence between this head and the
         // first memcpy below? Why do we need to synchronize here?
         // A stale head should not cause data race issues.
         let head = self.heads[pid].read_atomic(Ordering::Acquire);
         let queue_element_count = queue_element_count::<C>(head, tail) as usize;
-
         // actual length of elements to be copied
         let len = core::cmp::min(queue_element_count, dst.len());
         let target_wrap = (tail + len as udefault) & fmask_udefault::<C>();
@@ -413,62 +410,6 @@ impl<const C: usize> RWHead<C> {
     }
 }
 
-impl<
-        const T: usize,
-        const C: usize,
-        const S: usize,
-        const L: usize,
-        A: ThreadSafeAlloc,
-    > Display for TLQ<T, C, S, L, A>
-{
-    fn fmt(
-        &self,
-        f: &mut core::fmt::Formatter<'_>,
-    ) -> Result<(), core::fmt::Error> {
-        write!(
-            f,
-            "Head(val): {}\nHead(addr): 0x{:x}\nBuffer: {}",
-            self.head, self.head.0 as usize, self.buffer
-        )
-    }
-}
-
-impl<const L: usize> Display for ThreadLocalBuffer<L> {
-    fn fmt(
-        &self,
-        f: &mut core::fmt::Formatter<'_>,
-    ) -> Result<(), core::fmt::Error> {
-        unsafe {
-            let arr = *self.0;
-            write!(f, "[ ")?;
-            for elem in arr {
-                write!(f, "{elem:?} ")?;
-            }
-            write!(f, "]")?;
-        }
-        Ok(())
-    }
-}
-impl<const C: usize> Display for RWHead<C> {
-    fn fmt(
-        &self,
-        f: &mut core::fmt::Formatter<'_>,
-    ) -> Result<(), core::fmt::Error> {
-        unsafe { write!(f, "{:?}", *self.0) }
-    }
-}
-
-/// Deallocation function, specifically for MPSC queue.
-/// 1st param: pointer to full contiguous byte buffer
-/// 2nd param: size of the full buffer (type parameter S)
-/// 3rd param: alignment of the buffer, which is the size of the TLQ
-///            (type parameter L)
-pub type DeallocFn = fn(*mut u8, usize, usize);
-fn __dummy(_ptr: *mut u8, _size: usize, _align: usize) {}
-
-pub trait ThreadSafeAlloc: Allocator + Clone + Send {}
-impl<T: Allocator + Clone + Send> ThreadSafeAlloc for T {}
-
 /// Array of cache-aligned queue tails
 #[cfg_attr(cache_line = "32", repr(C, align(32)))]
 #[cfg_attr(cache_line = "64", repr(C, align(64)))]
@@ -755,27 +696,6 @@ fn drop_handle<
     };
 }
 
-impl<
-        const T: usize,
-        const C: usize,
-        const S: usize,
-        const L: usize,
-        A: ThreadSafeAlloc,
-    > Display for __MPSCQ<T, C, S, L, A>
-{
-    fn fmt(
-        &self,
-        f: &mut core::fmt::Formatter<'_>,
-    ) -> Result<(), core::fmt::Error> {
-        write!(f, "heads: ")?;
-        for (idx, h) in self.heads.iter().enumerate() {
-            write!(f, "[#{}: {}] ", idx, h.0.load(Ordering::Relaxed))?;
-        }
-        Ok(())
-    }
-}
-
-pub fn create_queue() {}
 /// Creates an MPSC queue using the standard allocator.
 ///
 /// Parameters:
