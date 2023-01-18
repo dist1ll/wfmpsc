@@ -73,7 +73,7 @@ for cache_line in [0, 128]:
         for prod in [1, 3, 5, 9]: # change this per machine
             for dummy in [0, 500]:
                 for chunk_size in [1]:
-                    cfg = f'--cfg cache_line=\\"{cache_line}\\"'
+                    cfg = f'--cfg cc_granularity=\\"{cache_line}\\"'
                     _env["WFMPSC_BENCH_PRODUCER_COUNT"] = str(prod)
                     _env["WFMPSC_BENCH_QUEUE_SIZE"] = str(queue_size)
                     _env["WFMPSC_BENCH_DUMMY_INSTRUCTIONS"] = str(dummy)
