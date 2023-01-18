@@ -17,7 +17,6 @@ use cfg::{cfg_from_env, BenchCfg};
 
 use std::{
     hint::black_box,
-    mem::size_of,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
