@@ -22,14 +22,17 @@ This test checks if indexing is correctly implemented for overlapping concurrent
 push and pop operations.
 */
 
+/// Check that we can't pop data from a producer ID higher than the given
+/// producer count
 #[test]
 #[should_panic]
 pub fn pid_overflow() {
-    let (tx, rx) = wfmpsc::queue!(bitsize: 4, producers: 1);
+    let (tx, rx) = wfmpsc::queue!(bitsize: 4, producers: 8);
     tx[0].push("".as_bytes());
-    let mut x = [0u8;12];
-    rx.pop_into(100, &mut x);
+    let mut x = [0u8; 12];
+    rx.pop_into(8, &mut x);
 }
+
 /// Check if custom deallocator is called.
 #[test]
 pub fn custom_dealloc() {
@@ -56,22 +59,18 @@ pub fn partial_write() {
     tx[0].push("Hello World, how are you doing".as_bytes());
     //                           ^
     //                     the 'w' is the 16th letter
-
     let mut dst = [0u8; 15];
     rx.pop_into(0, &mut dst);
     assert_eq!("Hello World, ho", conv(&dst));
 }
 
 #[test]
-pub fn concurrent_complete_write() {}
-
-#[test]
-pub fn concurrent_partial_write() {
+pub fn concurrent_write() {
     let mut handlers = vec![];
-    let total_bytes = 1_000_000; // 100 times queue size
+    let total_bytes = 500_000;
     const PROD_COUNT: usize = 8;
     let (tx, rx) = queue!(
-        bitsize: 15,
+        bitsize: 12,
         producers: PROD_COUNT
     );
     let prod_counter = Arc::new(AtomicUsize::new(PROD_COUNT));
