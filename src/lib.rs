@@ -6,7 +6,9 @@
 
 #![no_std]
 #![feature(allocator_api)]
+#![feature(return_position_impl_trait_in_trait)]
 
+use core::cmp::min;
 use core::fmt::Debug;
 use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 
@@ -55,6 +57,28 @@ pub const fn chunk_width(queue_bitwidth: usize) -> usize {
 pub trait ThreadSafeAlloc: Allocator + Clone + Send {}
 impl<T: Allocator + Clone + Send> ThreadSafeAlloc for T {}
 
+pub trait Section<'a> {
+    fn get_buffer<'b>(&'b mut self) -> &'b [u8];
+}
+// Section of the queue which may be safely accessed.
+pub struct SectionImpl<'a, const C: usize> {
+    pub buffer: &'a [u8],
+    tail: &'a RWTail<C>,
+    // value that the tail should have after dropping this section
+    val_to_store: udefault,
+}
+impl<'a, const C: usize> Section<'a> for SectionImpl<'a, C> {
+    fn get_buffer(&mut self) -> &'a [u8] {
+        self.buffer
+    }
+}
+impl<'a, const C: usize> Drop for SectionImpl<'a, C> {
+    fn drop(&mut self) {
+        unsafe {
+            self.tail.store_atomic(self.val_to_store, Ordering::Release);
+        }
+    }
+}
 /// A safe interface to access the MPSC queue, allowing a single
 pub trait ConsumerHandle {
     /// Returns the number of producers
@@ -64,6 +88,9 @@ pub trait ConsumerHandle {
     /// from its local queue, copies them into destination buffer `dst` and
     /// update the queue tail.Returns the number of elements that were copied
     fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize;
+
+    //
+    fn pop<'a>(&'a mut self, pid: usize) -> impl Section<'a>;
 }
 
 pub struct ConsumerHandleImpl<
@@ -73,7 +100,7 @@ pub struct ConsumerHandleImpl<
     const L: usize,
     A: ThreadSafeAlloc,
 > {
-    tails: RWTails<T, C>,
+    tails: [RWTail<C>; T],
     heads: [ReadOnlyHead<C>; T],
     buffer: ReadOnlyBuffer<T, S, L>,
     refcount: *const AtomicU32,
@@ -88,6 +115,34 @@ impl<
         A: ThreadSafeAlloc,
     > ConsumerHandle for ConsumerHandleImpl<T, C, S, L, A>
 {
+    fn pop<'a>(&'a mut self, pid: usize) -> impl Section<'a> {
+        // SAFETY: As long as `pid` is smaller than the producer count, we
+        // can perform array access with pid.
+        assert!(
+            pid < T,
+            "producer ID needs to be smaller than the producer count"
+        );
+        // SAFETY: We fulfilled the pid < T invariant
+        let tail = unsafe { self.tails[pid].read_atomic(Ordering::Relaxed) };
+        //FIXME: if queue empty, return None
+        let head = self.heads[pid].read_atomic(Ordering::Acquire);
+        let len = queue_element_count::<C>(head, tail) as usize;
+
+        // either target, or last index + 1 (i.e. 2^C)
+        let target_or_end = min(tail + len as udefault, 1 << C);
+        let src =
+            (self.buffer.tlq_base_ptr(pid) as usize + tail as usize) as *mut u8;
+        // SAFETY: We have at least 1 element.
+        let truncated_len = (target_or_end - tail) as usize;
+        unsafe {
+            SectionImpl {
+                buffer: core::slice::from_raw_parts(src, truncated_len),
+                tail: &self.tails[pid],
+                val_to_store: target_or_end & fmask_udefault::<C>(),
+            }
+        }
+    }
+
     fn pop_into(&self, pid: usize, dst: &mut [u8]) -> usize {
         // SAFETY: As long as `pid` is smaller than the producer count, we
         // can perform array access with pid.
@@ -96,7 +151,7 @@ impl<
             "producer ID needs to be smaller than the producer count"
         );
         // SAFETY: We fulfilled the pid < T invariant
-        let tail = unsafe { self.tails.read_atomic(pid, Ordering::Relaxed) };
+        let tail = unsafe { self.tails[pid].read_atomic(Ordering::Relaxed) };
         // FIXME: Understand why relaxed causes a data race in miri.
         // Isn't there a data dependence between this head and the
         // first memcpy below? Why do we need to synchronize here?
@@ -131,7 +186,7 @@ impl<
         }
         // SAFETY: We fulfilled the pid < T invariant
         unsafe {
-            self.tails.store_atomic(pid, target_wrap, Ordering::Release);
+            self.tails[pid].store_atomic(target_wrap, Ordering::Release);
         }
         len
     }
@@ -292,34 +347,27 @@ impl<const L: usize> ThreadLocalBuffer<L> {
 
 /// A read & write acces to all tails of the MPSCQ. This may only be accessed
 /// and modified by a single consumer.
-struct RWTails<const T: usize, const C: usize>(*const [AtomicTail; T]);
-impl<const T: usize, const C: usize> RWTails<T, C> {
-    pub fn new(ptr: *const [AtomicTail; T]) -> Self {
+struct RWTail<const C: usize>(*const AtomicTail);
+impl<const C: usize> RWTail<C> {
+    pub fn new(ptr: *const AtomicTail) -> Self {
         Self(ptr)
     }
     /// Safety invariant: pid < T
     #[inline(always)]
-    unsafe fn read_atomic(&self, pid: usize, ord: Ordering) -> udefault {
-        debug_assert!(pid < T);
-        let base_addr = self.0 as *mut AtomicTail as usize;
-        let pid_pointer = base_addr + pid * core::mem::size_of::<AtomicTail>();
+    unsafe fn read_atomic(&self, ord: Ordering) -> udefault {
         // PROVENANCE: Atomic variables can always be cast into a shared reference
-        let atomic = &*(pid_pointer as *const AtomicTail);
-        let l = atomic.load(ord);
+        let l = (&*self.0).load(ord);
         decompress(l, C)
     }
     /// Increment the tail atomically using release semantics.
     /// Automatically compresses the tail into the right size.
     /// Safety invariant: pid < T
     #[inline(always)]
-    unsafe fn store_atomic(&self, pid: usize, val: udefault, ord: Ordering) {
-        debug_assert!(pid < T);
+    unsafe fn store_atomic(&self, val: udefault, ord: Ordering) {
         let val = compress(val, C);
         // NOTE: We don't need CAS or LL/SC because we are the only thread
         // that's performing STORE operations on this memory address.
-        let atomic: &AtomicTail =
-            &*((self.0 as usize + pid * size_of::<AtomicTail>()) as *mut _);
-        atomic.store(val, ord);
+        (&*self.0).store(val, ord);
     }
 }
 
@@ -376,7 +424,6 @@ impl<const T: usize, const S: usize, const L: usize> ReadOnlyBuffer<T, S, L> {
     pub fn tlq_base_ptr(&self, pid: usize) -> *mut u8 {
         debug_assert!(pid < T,
         "this queue has {T} producers, but you selected a too large pid={pid}");
-        // TODO: Check for assembly optimizations here
         (self.0 as usize + pid * L) as *mut u8
     }
 }
@@ -526,6 +573,7 @@ fn cons_handle<
 >(
     ptr: *mut __MPSCQ<T, C, S, L, A>,
 ) -> ConsumerHandleImpl<T, C, S, L, A> {
+    // HEADS
     let mut heads: [MaybeUninit<ReadOnlyHead<C>>; T] =
         unsafe { MaybeUninit::uninit().assume_init() };
     for (i, h) in heads.iter_mut().enumerate() {
@@ -538,8 +586,20 @@ fn cons_handle<
     let heads_ptr = addr_of!(heads) as *const _;
     let heads = unsafe { core::ptr::read(heads_ptr) };
 
+    // TAILS
+
+    let mut tails: [MaybeUninit<RWTail<C>>; T] =
+        unsafe { MaybeUninit::uninit().assume_init() };
+    for (i, t) in tails.iter_mut().enumerate() {
+        t.write(RWTail::new(unsafe { addr_of_mut!((*ptr).tails.0[i]) }));
+    }
+    // FIXME: Cannot do mem::transmute from MaybeUninit to a const generic
+    // array. See https://github.com/rust-lang/rust/issues/61956
+    let tails_ptr = addr_of!(tails) as *const _;
+    let tails = unsafe { core::ptr::read(tails_ptr) };
+
     ConsumerHandleImpl::<T, C, S, L, A> {
-        tails: RWTails::<T, C>::new(unsafe { addr_of_mut!((*ptr).tails.0) }),
+        tails,
         heads,
         buffer: ReadOnlyBuffer::<T, S, L>::new(unsafe {
             addr_of_mut!((*ptr).buffer)

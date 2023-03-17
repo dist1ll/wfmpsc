@@ -15,7 +15,7 @@ use std::{
     },
 };
 use util::MockAllocator;
-use wfmpsc::{queue, ConsumerHandle, ThreadSafeAlloc, TLQ};
+use wfmpsc::{queue, ConsumerHandle, Section, ThreadSafeAlloc, TLQ};
 
 /**!
 This test checks if indexing is correctly implemented for overlapping concurrent
@@ -85,6 +85,43 @@ pub fn concurrent_write() {
     for h in handlers {
         h.join().expect("Joining thread");
     }
+}
+
+#[test]
+pub fn no_overlapping_pops() {
+    let (tx, rx) = wfmpsc::queue!(bitsize: 4, producers: 1);
+    tx[0].push("123456789".as_bytes());
+    let mut dst = [0u8; 4];
+    rx.pop_into(0, &mut dst);
+    assert_eq!("1234", conv(&dst));
+    rx.pop_into(0, &mut dst);
+    assert_eq!("5678", conv(&dst));
+}
+
+#[test]
+pub fn raii_slice() {
+    // max capacity is 2^3 - 1
+    let (tx, mut rx) = wfmpsc::queue!(bitsize: 3, producers: 1);
+    tx[0].push("1234".as_bytes());
+    {
+        let mut section = rx.pop(0);
+        let buffer = section.get_buffer();
+        assert_eq!(tx[0].tail.read_atomic(Ordering::Relaxed), 0);
+        assert_eq!("1234", conv(buffer));
+        drop(buffer);
+    } // dropping buffer, which should increase tail
+    tx[0].push(b"5678901");
+    {
+        assert_eq!(tx[0].tail.read_atomic(Ordering::Relaxed), 4);
+        let mut section = rx.pop(0);
+        let buffer = section.get_buffer();
+    } // dropping buffer
+
+    // tail = ZERO because pop can't do split reads.
+    assert_eq!(tx[0].tail.read_atomic(Ordering::Relaxed), 0);
+    let mut section = rx.pop(0);
+    let buffer = section.get_buffer();
+    assert_eq!("901", conv(buffer));
 }
 
 fn push_wfmpsc<
