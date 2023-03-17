@@ -152,6 +152,7 @@ impl<
         );
         // SAFETY: We fulfilled the pid < T invariant
         let tail = unsafe { self.tails[pid].read_atomic(Ordering::Relaxed) };
+
         // FIXME: Understand why relaxed causes a data race in miri.
         // Isn't there a data dependence between this head and the
         // first memcpy below? Why do we need to synchronize here?
@@ -458,16 +459,16 @@ impl<const C: usize> RWHead<C> {
 }
 
 /// Array of cache-aligned queue tails
-#[cfg_attr(cc_granularity = "32", repr(C, align(32)))]
-#[cfg_attr(cc_granularity = "64", repr(C, align(64)))]
-#[cfg_attr(cc_granularity = "128", repr(C, align(128)))]
+#[cfg_attr(cc_granularity = "32", repr(align(32)))]
+#[cfg_attr(cc_granularity = "64", repr(align(64)))]
+#[cfg_attr(cc_granularity = "128", repr(align(128)))]
 #[derive(Debug)]
 pub struct __Tails<const T: usize>(pub [AtomicTail; T]);
 
 /// Single queue head
-#[cfg_attr(cc_granularity = "32", repr(C, align(32)))]
-#[cfg_attr(cc_granularity = "64", repr(C, align(64)))]
-#[cfg_attr(cc_granularity = "128", repr(C, align(128)))]
+#[cfg_attr(cc_granularity = "32", repr(align(32)))]
+#[cfg_attr(cc_granularity = "64", repr(align(64)))]
+#[cfg_attr(cc_granularity = "128", repr(align(128)))]
 #[derive(Debug)]
 pub struct __Head(pub AtomicHead);
 
