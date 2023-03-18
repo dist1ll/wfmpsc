@@ -12,7 +12,7 @@ use core::cmp::min;
 use core::fmt::Debug;
 use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 
-use core::mem::{size_of, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::ptr::{addr_of, addr_of_mut, copy_nonoverlapping};
 use core::{
     alloc::{AllocError, Allocator, Layout},
@@ -219,7 +219,7 @@ pub struct TLQ<
 > {
     pub head: RWHead<C>,
     pub tail: ReadOnlyTail<C>,
-    pub buffer: ThreadLocalBuffer<L>,
+    pub buffer: RWBuffer<L>,
     refcount: *const AtomicU32,
     mpscq_ptr: *const __MPSCQ<T, C, S, L, A>,
 }
@@ -339,8 +339,8 @@ unsafe impl<
 }
 
 #[derive(Debug)] // TODO: Add custom debug implementation!
-pub struct ThreadLocalBuffer<const L: usize>(*mut [u8; L]);
-impl<const L: usize> ThreadLocalBuffer<L> {
+pub struct RWBuffer<const L: usize>(*mut [u8; L]);
+impl<const L: usize> RWBuffer<L> {
     pub fn new(ptr: *mut [u8; L]) -> Self {
         Self(ptr)
     }
@@ -553,7 +553,7 @@ fn prod_handle<
         head: RWHead::new(unsafe {
             addr_of_mut!((*ptr).heads[pid as usize].0)
         }),
-        buffer: ThreadLocalBuffer::<L>::new(
+        buffer: RWBuffer::<L>::new(
             (unsafe { addr_of_mut!((*ptr).buffer) } as usize + {
                 pid as usize * { 1 << C }
             }) as *mut [u8; L],
