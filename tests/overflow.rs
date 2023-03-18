@@ -15,7 +15,7 @@ use std::{
     },
 };
 use util::MockAllocator;
-use wfmpsc::{queue, ConsumerHandle, Section, ThreadSafeAlloc, TLQ};
+use wfmpsc::{queue, ConsumerHandle, ProducerHandle, Section, ThreadSafeAlloc};
 
 /**!
 This test checks if indexing is correctly implemented for overlapping concurrent
@@ -131,7 +131,7 @@ fn push_wfmpsc<
     const L: usize,
     A: ThreadSafeAlloc,
 >(
-    mut p: TLQ<T, C, S, L, A>,
+    mut p: ProducerHandle<T, C, S, L, A>,
     bytes: usize,
     chunk_size: usize,
     pc: Arc<AtomicUsize>,

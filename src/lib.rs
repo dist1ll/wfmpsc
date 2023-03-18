@@ -210,7 +210,7 @@ unsafe impl<
 /// A producer handle. Use this to push data into the MPSC queue that can be
 /// read by the consumer.
 #[derive(Debug)]
-pub struct TLQ<
+pub struct ProducerHandle<
     const T: usize,
     const C: usize,
     const S: usize,
@@ -230,7 +230,7 @@ impl<
         const S: usize,
         const L: usize,
         A: ThreadSafeAlloc,
-    > TLQ<T, C, S, L, A>
+    > ProducerHandle<T, C, S, L, A>
 {
     /// Pushes a byte slice to the buffer. Performs a partial write if
     /// the queue is full. Returns the number of bytes written to the queue.
@@ -334,7 +334,7 @@ unsafe impl<
         const S: usize,
         const L: usize,
         A: ThreadSafeAlloc,
-    > Send for TLQ<T, C, S, L, A>
+    > Send for ProducerHandle<T, C, S, L, A>
 {
 }
 
@@ -503,7 +503,10 @@ impl<
     pub fn split_view_with_allocator(
         alloc: A,
     ) -> Result<
-        ([TLQ<T, C, S, L, A>; T], ConsumerHandleImpl<T, C, S, L, A>),
+        (
+            [ProducerHandle<T, C, S, L, A>; T],
+            ConsumerHandleImpl<T, C, S, L, A>,
+        ),
         AllocError,
     > {
         let layout = Self::layout();
@@ -515,8 +518,10 @@ impl<
     }
     #[cfg(feature = "alloc")]
     /// Create a new queue with the default allocator via `alloc` extern crate.
-    pub fn split_view_default(
-    ) -> ([TLQ<T, C, S, L, A>; T], ConsumerHandleImpl<T, C, S, L, A>) {
+    pub fn split_view_default() -> (
+        [ProducerHandle<T, C, S, L, A>; T],
+        ConsumerHandleImpl<T, C, S, L, A>,
+    ) {
         extern crate alloc;
         let layout = Self::layout();
         let queue = unsafe {
@@ -544,9 +549,9 @@ fn prod_handle<
 >(
     ptr: *mut __MPSCQ<T, C, S, L, A>,
     pid: u8,
-) -> TLQ<T, C, S, L, A> {
+) -> ProducerHandle<T, C, S, L, A> {
     assert!((pid as usize) < T);
-    TLQ::<T, C, S, L, A> {
+    ProducerHandle::<T, C, S, L, A> {
         tail: ReadOnlyTail::new(unsafe {
             addr_of_mut!((*ptr).tails.0[pid as usize])
         }),
@@ -622,13 +627,16 @@ fn split<
 >(
     ptr: *mut __MPSCQ<T, C, S, L, A>,
     alloc: Option<A>,
-) -> ([TLQ<T, C, S, L, A>; T], ConsumerHandleImpl<T, C, S, L, A>) {
+) -> (
+    [ProducerHandle<T, C, S, L, A>; T],
+    ConsumerHandleImpl<T, C, S, L, A>,
+) {
     let alloc_ptr = unsafe { addr_of_mut!((*ptr).alloc) };
     unsafe {
         alloc_ptr.write(alloc);
     }
 
-    let mut producers: [MaybeUninit<TLQ<T, C, S, L, A>>; T] =
+    let mut producers: [MaybeUninit<ProducerHandle<T, C, S, L, A>>; T] =
         unsafe { MaybeUninit::uninit().assume_init() };
     for (i, p) in producers.iter_mut().enumerate() {
         p.write(prod_handle(ptr, i as u8));
@@ -690,7 +698,7 @@ impl<
         const S: usize,
         const L: usize,
         A: ThreadSafeAlloc,
-    > Drop for TLQ<T, C, S, L, A>
+    > Drop for ProducerHandle<T, C, S, L, A>
 {
     fn drop(&mut self) {
         // sound because we obtained our refcount from a valid shared reference
