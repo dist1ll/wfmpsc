@@ -58,7 +58,7 @@ pub trait ThreadSafeAlloc: Allocator + Clone + Send {}
 impl<T: Allocator + Clone + Send> ThreadSafeAlloc for T {}
 
 pub trait Section<'a> {
-    fn get_buffer<'b>(&'b mut self) -> &'b [u8];
+    fn get_buffer<'b>(&'b mut self) -> &'b [u8] where 'a: 'b;
 }
 // Section of the queue which may be safely accessed.
 pub struct SectionImpl<'a, const C: usize> {
@@ -68,7 +68,7 @@ pub struct SectionImpl<'a, const C: usize> {
     val_to_store: udefault,
 }
 impl<'a, const C: usize> Section<'a> for SectionImpl<'a, C> {
-    fn get_buffer(&mut self) -> &'a [u8] {
+    fn get_buffer<'b>(&'b mut self) -> &'b [u8] where 'a: 'b{
         self.buffer
     }
 }

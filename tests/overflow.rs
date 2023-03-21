@@ -108,7 +108,6 @@ pub fn raii_slice() {
         let buffer = section.get_buffer();
         assert_eq!(tx[0].tail.read_atomic(Ordering::Relaxed), 0);
         assert_eq!("1234", conv(buffer));
-        drop(buffer);
     } // dropping buffer, which should increase tail
     tx[0].push(b"5678901");
     {
